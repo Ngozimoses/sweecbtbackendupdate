@@ -71,7 +71,8 @@ app.use(helmet({
 const allowedOrigins = [
   process.env.CLIENT_URL,
   'http://localhost:5173',  // Vite dev server
-  'http://localhost:3000',  // Create React App dev server
+  'http://localhost:3000',
+  'http://localhost:3001',// Create React App dev server
   'https://sweecbt.vercel.app'  // Your production frontend
 ];
 
