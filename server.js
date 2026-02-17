@@ -200,7 +200,7 @@ app.get('/api/docs', (req, res) => {
 // ========================
 // ERROR HANDLING FOR 404
 // ========================
-app.use('*', (req, res) => {
+app.use((req, res) => {
   res.status(404).json({
     success: false,
     error: {
