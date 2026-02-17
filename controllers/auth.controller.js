@@ -207,7 +207,9 @@ const register = async (req, res, next) => {
 const login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
-    
+    if (typeof email === 'string') {
+      email = email.replace(/^["']|["']$/g, '').trim().toLowerCase();
+    }
     if (!email || !password) {
       return res.status(400).json({ 
         status: 'error', 
