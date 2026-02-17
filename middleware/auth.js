@@ -4,7 +4,7 @@ const User = require('../models/User');
 const logger = require('../config/logger');
 const { decrypt } = require('../utils/encryptDecrypt');
 
-const TokenBlacklist = require('../models/tokenBlacklistSchema');
+const TokenBlacklist = require('../models/TokenBlacklist');
 
 
 /**
