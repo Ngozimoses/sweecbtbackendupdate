@@ -47,6 +47,7 @@ const ALL_ROLES = [
 
 const ADMIN_LEVEL_ROLES = [
   'admin',
+  'teacher',
 ];
 
 const modelMap = {
