@@ -470,7 +470,7 @@ const authMiddleware = (requiredRole = null) => {
         const requiredRoles = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
         
         // Check for 'anyAdmin' special role
-        if (requiredRoles.includes('anyAdmin')) {
+        if (['anyAdmin', 'teacher', 'admin'].some(role => requiredRoles.includes(role))) {
           if (ADMIN_LEVEL_ROLES.includes(req.user.role)) {
             return next();
           } else {
