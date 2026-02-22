@@ -145,7 +145,7 @@ const publishExamResults = async (req, res) => {
 const requestReevaluation = async (req, res) => {
   try {
     const submission = await Submission.findById(req.params.submissionId);
-    if (!submission || submission.student.toString() !== req.user.id) {
+    if (!submission || submission.student.toString() !== req.user?._id.toString()) {
       return res.status(403).json({ message: 'Access denied.' });
     }
 

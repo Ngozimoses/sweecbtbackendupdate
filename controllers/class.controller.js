@@ -81,7 +81,7 @@ const getClassById = async (req, res) => {
     }
     if (req.user.role === 'student') {
       const isEnrolled = cls.students.some(student => 
-        student._id.toString() === req.user.id
+        student._id.toString() === req.user?._id.toString()
       );
       if (isEnrolled) {
         return res.json(cls);

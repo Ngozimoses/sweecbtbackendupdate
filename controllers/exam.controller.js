@@ -21,7 +21,7 @@ const getAllExams = async (req, res) => {
     if (teacher) {
       filter.createdBy = teacher;
     } else if (req.user.role === 'teacher') {
-      filter.createdBy = req.user.id;
+      filter.createdBy = req.user?._id.toString();;
     }
     
     if (classId) filter.class = classId;
@@ -109,7 +109,7 @@ const createExam = async (req, res) => {
         type: q.type,
         text: q.text,
         subject,
-        createdBy: req.user.id,
+        createdBy:req.user?._id.toString(),
         difficulty: 'medium',
         options,
         points: q.marks
@@ -163,7 +163,7 @@ const createExam = async (req, res) => {
 const submitExam = async (req, res) => {
   try {
     const examId = req.params.id;
-    const studentId = req.user.id;
+    const studentId = req.user?._id.toString();
     const { error, value } = require('../validators/exam.validator').submitExamSchema.validate(req.body);
     if (error) {
       return res.status(400).json({ message: error.details[0].message });
@@ -479,7 +479,7 @@ const scheduleExam = async (req, res) => {
 // ✅ FIXED: Removed invalid eligibleStudents field
 const getActiveExams = async (req, res) => {
   try {
-    const student = await User.findById(req.user.id).select('class');
+    const student = await User.findById(req.user?._id.toString()).select('class');
     if (!student.class) {
       return res.json([]);
     }
@@ -506,7 +506,7 @@ const getStudentExamResult = async (req, res) => {
     // Find the submission for this student and exam
     const submission = await Submission.findOne({
       exam: req.params.id,
-      student: req.user.id
+      student: req.user?._id.toString()
     })
     .populate('exam', 'title subject passingMarks maxScore')
     .populate('exam.subject', 'name')
@@ -529,7 +529,7 @@ const getExamSubmissions = async (req, res) => {
   try {
     const exam = await Exam.findOne({
       _id: req.params.id,
-      createdBy: req.user.id
+      createdBy: req.user?._id.toString()
     });
     if (!exam) {
       return res.status(403).json({ message: 'Access denied.' });
@@ -550,7 +550,7 @@ const getExamSubmissions = async (req, res) => {
 const startExam = async (req, res) => {
   try {
     const { id: examId } = req.params;
-    const studentId = req.user.id;
+    const studentId = req.user?._id.toString();
 
     // 1. Validate exam exists and is published
     const exam = await Exam.findById(examId);

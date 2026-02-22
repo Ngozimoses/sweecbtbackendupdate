@@ -13,7 +13,7 @@ const autoSave = async (req, res) => {
       return res.status(404).json({ message: 'Submission not found' });
     }
 
-    if (submission.student.toString() !== req.user.id) {
+    if (submission.student.toString() !== req.user?._id.toString()) {
       return res.status(403).json({ message: 'Access denied' });
     }
 

@@ -4,7 +4,7 @@ const User = require('../models/User');
 
 const getUserNotifications = async (req, res) => {
   try {
-    const notifications = await Notification.find({ user: req.user.id })
+    const notifications = await Notification.find({ user: req.user?._id.toString() })
       .sort({ createdAt: -1 });
     res.json(notifications);
   } catch (error) {
@@ -28,7 +28,7 @@ const markNotificationRead = async (req, res) => {
 
 const markAllNotificationsRead = async (req, res) => {
   try {
-    await Notification.updateMany({ user: req.user.id }, { read: true });
+    await Notification.updateMany({ user: req.user?._id.toString() }, { read: true });
     res.json({ message: 'All notifications marked as read.' });
   } catch (error) {
     res.status(500).json({ message: 'Failed to mark all as read.' });

@@ -34,10 +34,10 @@ const getExamStatus = (exam, submission, now) => {
 // Get recent exam results for current student
 const getRecentResults = async (req, res) => {
   try {
-    const studentId = req.params.id === 'me' ? req.user.id : req.params.id;
+    const studentId = req.params.id === 'me' ? req.user?._id.toString() : req.params.id;
     
     if (req.params.id && req.params.id !== 'me') {
-      if (req.user.role === 'student' && req.user.id !== studentId) {
+      if (req.user.role === 'student' && req.user?._id.toString() !== studentId) {
         return res.status(403).json({ message: 'Access denied' });
       }
     }
@@ -100,10 +100,10 @@ const getRecentResults = async (req, res) => {
 // Get subject-wise performance for current student
 const getPerformance = async (req, res) => {
   try {
-    const studentId = req.params.id === 'me' ? req.user.id : req.params.id;
+    const studentId = req.params.id === 'me' ? req.user?._id.toString(): req.params.id;
     
     if (req.params.id && req.params.id !== 'me') {
-      if (req.user.role === 'student' && req.user.id !== studentId) {
+      if (req.user.role === 'student' && req.user?._id.toString() !== studentId) {
         return res.status(403).json({ message: 'Access denied' });
       }
     }
@@ -161,10 +161,10 @@ const getPerformance = async (req, res) => {
 // Get upcoming exams for current student
 const getUpcomingExams = async (req, res) => {
   try {
-    const studentId = req.params.id === 'me' ? req.user.id : req.params.id;
+    const studentId = req.params.id === 'me' ? req.user?._id.toString() : req.params.id;
     
     if (req.params.id && req.params.id !== 'me') {
-      if (req.user.role === 'student' && req.user.id !== studentId) {
+      if (req.user.role === 'student' && req.user?._id.toString() !== studentId) {
         return res.status(403).json({ message: 'Access denied' });
       }
     }
@@ -205,7 +205,7 @@ const getUpcomingExams = async (req, res) => {
 // Get exam history for current student
 const getMyExamHistory = async (req, res) => {
   try {
-    const studentId = req.user.id;
+    const studentId = req.user?._id.toString();
     const now = nowUTC();
 
     const student = await User.findById(studentId).select('class');
