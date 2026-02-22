@@ -9,7 +9,7 @@ const path = require('path');
 const cookieParser = require('cookie-parser');
 
 // Add this BEFORE your routes, after helmet/cors
-app.use(cookieParser());
+
 // Load environment variables from .env
 dotenv.config({ path: path.resolve(__dirname, '.env') });
 
@@ -40,7 +40,7 @@ const app = express();
 // Import configurations
 const connectDB = require('./config/db');
 const logger = require('./config/logger');
-
+app.use(cookieParser());
 // Import middleware
 const { errorHandler } = require('./middleware/error');
 const { handleUploadError } = require('./middleware/upload');
