@@ -88,16 +88,16 @@ const setTokensAsCookies = (res, accessToken, refreshToken) => {
   
   res.cookie('accessToken', encrypt(accessToken), {
     httpOnly: true, 
-    secure: isProduction,
-    sameSite: isProduction ? 'lax' : 'lax',
+    secure: true,
+    sameSite: isProduction ? 'None' : 'None',
     path: '/',
     maxAge: 15 * 60 * 1000 // 15 minutes
   });
 
   res.cookie('refreshToken', encrypt(refreshToken), {
     httpOnly: true, 
-    secure: isProduction,
-    sameSite: isProduction ? 'lax' : 'lax',
+    secure: true,
+    sameSite: isProduction ? 'None' : 'None',
     path: '/',
     maxAge: CONFIG.REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000
   });
@@ -593,15 +593,15 @@ const logout = async (req, res) => {
     
     res.clearCookie('accessToken', {
       httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'lax' : 'lax',
+      secure: true,
+      sameSite: 'None',
       path: '/' 
     });
     
     res.clearCookie('refreshToken', {
       httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'lax' : 'lax',
+      secure: true,
+      sameSite: 'None',
       path: '/' 
     });
 
@@ -620,15 +620,15 @@ const logout = async (req, res) => {
     
     res.clearCookie('accessToken', {
       httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'lax' : 'lax',
+      secure: true,
+      sameSite: 'None',
       path: '/' 
     });
     
     res.clearCookie('refreshToken', {
       httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'lax' : 'lax',
+      secure: true,
+      sameSite: 'None',
       path: '/' 
     });
     
@@ -700,15 +700,15 @@ const logoutAll = async (req, res) => {
     
     res.clearCookie('accessToken', {
       httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'lax' : 'lax',
+      secure: true,
+      sameSite: 'None',
       path: '/' 
     });
     
     res.clearCookie('refreshToken', {
       httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'lax' : 'lax',
+      secure: true,
+      sameSite: 'None',
       path: '/' 
     });
 
