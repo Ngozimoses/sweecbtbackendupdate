@@ -1,5 +1,6 @@
 // middleware/auth.js
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const User = require('../models/User');
 const logger = require('../config/logger');
 const { decrypt } = require('../utils/encryptDecrypt');
