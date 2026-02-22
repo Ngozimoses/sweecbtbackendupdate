@@ -40,7 +40,7 @@ const app = express();
 // Import configurations
 const connectDB = require('./config/db');
 const logger = require('./config/logger');
-app.use(cookieParser());
+
 // Import middleware
 const { errorHandler } = require('./middleware/error');
 const { handleUploadError } = require('./middleware/upload');
@@ -116,7 +116,7 @@ if (process.env.NODE_ENV === 'development') {
     })
   );
 }
-
+app.use(cookieParser());
 // ========================
 // BODY PARSING
 // ========================
