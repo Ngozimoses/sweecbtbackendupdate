@@ -1,9 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const { authMiddleware } = require('../middleware/auth');  // ✅ Fixed import
+const { authMiddleware } = require('../middleware/auth'); 
 const teacherCtrl = require('../controllers/teacher.controller');
 
-// ✅ Use authMiddleware correctly
+// Use authMiddleware correctly
 // router.use(authMiddleware(['teacher', 'admin']));
 
 // Handle /me routes (uses req.user.id)
