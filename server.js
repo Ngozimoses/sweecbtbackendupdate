@@ -6,7 +6,10 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const path = require('path');
+const cookieParser = require('cookie-parser');
 
+// Add this BEFORE your routes, after helmet/cors
+app.use(cookieParser());
 // Load environment variables from .env
 dotenv.config({ path: path.resolve(__dirname, '.env') });
 
