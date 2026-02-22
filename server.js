@@ -135,7 +135,11 @@ const limiter = rateLimit({
   legacyHeaders: false,
 });
 app.use('/api/', limiter);
-
+app.use((req, res, next) => {
+  console.log('🍪 Cookies:', req.cookies);
+  console.log('📋 Headers:', req.headers.cookie);
+  next();
+});
 // ========================
 // ROUTES
 // ========================
