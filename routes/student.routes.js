@@ -1,21 +1,107 @@
-// routes/student.routes.js
 const express = require('express');
 const router = express.Router();
-const { protect, requireRole,authMiddleware } = require('../middleware/auth');
+const { protect, requireRole } = require('../middleware/auth');
 const studentCtrl = require('../controllers/student.controller');
 
-// ✅ EXISTING: Exam history for current user
-router.get('/me/exam-history', authMiddleware('student'), studentCtrl.getMyExamHistory);
-// ✅ ADD THESE MISSING ROUTES:
-router.get('/me/upcoming-exams', authMiddleware('student'), studentCtrl.getUpcomingExams);
-router.get('/me/recent-results', authMiddleware('student'), studentCtrl.getRecentResults);
-router.get('/me/performance', authMiddleware('student'), studentCtrl.getPerformance);
+// All routes are protected
+router.use(protect);
 
-// Keep existing :id routes for admin access
-router.get('/:id/exam-history', authMiddleware(['admin', 'student']), studentCtrl.getExamHistory);
-router.get('/:id/upcoming-exams', authMiddleware(['admin', 'student']), studentCtrl.getUpcomingExams);
-router.get('/:id/recent-results', authMiddleware(['admin', 'student']), studentCtrl.getRecentResults);
-router.get('/:id/performance', authMiddleware(['admin', 'student']), studentCtrl.getPerformance);
-router.get('/:id/exam-result/:examId', authMiddleware(['admin', 'student']), studentCtrl.getExamResult);
+// ========================
+// CURRENT USER ROUTES (using 'me')
+// ========================
+
+/**
+ * @route   GET /api/students/me/exam-history
+ * @desc    Get exam history for current student
+ * @access  Private (Student only)
+ */
+router.get('/me/exam-history', 
+  requireRole('student'), 
+  studentCtrl.getMyExamHistory
+);
+
+/**
+ * @route   GET /api/students/me/upcoming-exams
+ * @desc    Get upcoming exams for current student
+ * @access  Private (Student only)
+ */
+router.get('/me/upcoming-exams', 
+  requireRole('student'), 
+  studentCtrl.getUpcomingExams
+);
+
+/**
+ * @route   GET /api/students/me/recent-results
+ * @desc    Get recent results for current student
+ * @access  Private (Student only)
+ */
+router.get('/me/recent-results', 
+  requireRole('student'), 
+  studentCtrl.getRecentResults
+);
+
+/**
+ * @route   GET /api/students/me/performance
+ * @desc    Get performance metrics for current student
+ * @access  Private (Student only)
+ */
+router.get('/me/performance', 
+  requireRole('student'), 
+  studentCtrl.getPerformance
+);
+
+// ========================
+// SPECIFIC STUDENT ROUTES (admin or self)
+// ========================
+
+/**
+ * @route   GET /api/students/:id/exam-history
+ * @desc    Get exam history for specific student
+ * @access  Private (Admin or the student themselves)
+ */
+router.get('/:id/exam-history', 
+  requireRole('admin', 'student'), 
+  studentCtrl.getExamHistory
+);
+
+/**
+ * @route   GET /api/students/:id/upcoming-exams
+ * @desc    Get upcoming exams for specific student
+ * @access  Private (Admin or the student themselves)
+ */
+router.get('/:id/upcoming-exams', 
+  requireRole('admin', 'student'), 
+  studentCtrl.getUpcomingExams
+);
+
+/**
+ * @route   GET /api/students/:id/recent-results
+ * @desc    Get recent results for specific student
+ * @access  Private (Admin or the student themselves)
+ */
+router.get('/:id/recent-results', 
+  requireRole('admin', 'student'), 
+  studentCtrl.getRecentResults
+);
+
+/**
+ * @route   GET /api/students/:id/performance
+ * @desc    Get performance metrics for specific student
+ * @access  Private (Admin or the student themselves)
+ */
+router.get('/:id/performance', 
+  requireRole('admin', 'student'), 
+  studentCtrl.getPerformance
+);
+
+/**
+ * @route   GET /api/students/:id/exam-result/:examId
+ * @desc    Get specific exam result for a student
+ * @access  Private (Admin or the student themselves)
+ */
+router.get('/:id/exam-result/:examId', 
+  requireRole('admin', 'student'), 
+  studentCtrl.getExamResult
+);
 
 module.exports = router;

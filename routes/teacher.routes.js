@@ -1,30 +1,27 @@
 const express = require('express');
 const router = express.Router();
-const { authMiddleware } = require('../middleware/auth'); 
+const { protect, requireRole } = require('../middleware/auth');
 const teacherCtrl = require('../controllers/teacher.controller');
 
-// Use authMiddleware correctly
-// router.use(authMiddleware(['teacher', 'admin']));
+// All routes are protected
+router.use(protect);
 
-// Handle /me routes (uses req.user.id)
-// router.get('/me/pending-submissions', (req, res) => {
-//   req.params.teacherId = req.user.id;
-//   return teacherCtrl.getPendingSubmissions(req, res);
-// });
+// Get pending submissions for a teacher
+router.get('/:teacherId/pending-submissions', 
+  requireRole('teacher', 'admin'), 
+  teacherCtrl.getPendingSubmissions
+);
 
-// router.get('/me/students', (req, res) => {
-//   req.params.teacherId = req.user.id;
-//   return teacherCtrl.getTeacherStudents(req, res);
-// });
+// Get students taught by this teacher
+router.get('/:teacherId/students', 
+  requireRole('teacher', 'admin'), 
+  teacherCtrl.getTeacherStudents
+);
 
-// router.get('/me/performance', (req, res) => {
-//   req.params.teacherId = req.user.id;
-//   return teacherCtrl.getClassPerformance(req, res);
-// });
-
-// Keep existing :teacherId routes for admin access
-router.get('/:teacherId/pending-submissions', authMiddleware(['teacher', 'admin']),teacherCtrl.getPendingSubmissions);
-router.get('/:teacherId/students',authMiddleware(['teacher', 'admin']), teacherCtrl.getTeacherStudents);
-router.get('/:teacherId/performance', authMiddleware(['teacher', 'admin']), teacherCtrl.getClassPerformance);
+// Get class performance for teacher's classes
+router.get('/:teacherId/performance', 
+  requireRole('teacher', 'admin'), 
+  teacherCtrl.getClassPerformance
+);
 
 module.exports = router;
