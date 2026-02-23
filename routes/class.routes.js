@@ -15,7 +15,7 @@ router.route('/')
 
 // Single class routes
 router.route('/:id')
-  .get( authMiddleware(['admin', 'teacher']), classCtrl.getClassById) // ✅ FIXED
+  .get( authMiddleware(['admin', 'teacher']), classCtrl.getClassById) 
   .patch( authMiddleware('admin'), validate(classValidator.updateClassSchema), classCtrl.updateClass)
   .delete( authMiddleware('admin'), classCtrl.deleteClass);
 
