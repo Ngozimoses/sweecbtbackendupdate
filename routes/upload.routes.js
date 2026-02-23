@@ -1,14 +1,16 @@
-// routes/upload.routes.js
 const express = require('express');
 const router = express.Router();
-const { protect, requireRole ,authMiddleware} = require('../middleware/auth');
+const { protect, requireRole } = require('../middleware/auth');
 const { upload, handleUploadError } = require('../middleware/upload');
-const   uploadCtrl = require('../controllers/upload.controller');
+const uploadCtrl = require('../controllers/upload.controller');
+
+// All routes are protected
+router.use(protect);
 
 // Exam answer upload (student)
 router.post(
   '/exam-answer',
-  authMiddleware('student'),
+  requireRole('student'),
   upload.single('file'),
   handleUploadError,
   uploadCtrl.uploadExamAnswer
@@ -17,13 +19,13 @@ router.post(
 // Study material upload (teacher)
 router.post(
   '/material',
-  authMiddleware(['teacher', 'admin']),
+  requireRole('teacher', 'admin'),
   upload.single('file'),
   handleUploadError,
   uploadCtrl.uploadMaterial
 );
 
 // File download
-router.get('/:fileId', authMiddleware(['teacher', 'admin']), uploadCtrl.downloadFile);
+router.get('/:fileId', requireRole('teacher', 'admin'), uploadCtrl.downloadFile);
 
 module.exports = router;
