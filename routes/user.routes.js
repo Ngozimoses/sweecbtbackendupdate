@@ -17,6 +17,6 @@ router.route('/:id')
   .delete(authMiddleware('admin'), userCtrl.deleteUser);
 // Add these if needed (optional - can use existing endpoints with filters) 
 // Current user routes
-router.get('/me/classes', authMiddleware('student'), userCtrl.getCurrentUserClasses);
+router.get('/me/classes', authMiddleware(['student', 'teacher', 'admin']), userCtrl.getCurrentUserClasses);
 
 module.exports = router;
