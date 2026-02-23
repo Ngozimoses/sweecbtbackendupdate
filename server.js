@@ -1,5 +1,3 @@
-// // server.js
-// server.js
 // server.js
 const express = require('express');
 const dotenv = require('dotenv');
@@ -98,7 +96,7 @@ app.use(cors(corsOptions));
 
 // ✅ This is the critical fix — explicitly handle ALL OPTIONS preflight requests
 // before any other middleware (rate limiter, auth, etc.) can block them
-app.options('*', cors(corsOptions));
+app.options(/(.*)/, cors(corsOptions));
 
 // ========================
 // LOGGING MIDDLEWARE
