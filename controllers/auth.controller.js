@@ -1,8 +1,13 @@
-// src/controllers/auth.controller.js
 const User = require('../models/User');
-const { generateAccessToken, generateRefreshToken, verifyToken } = require('../utils/jwt');
+const { 
+  generateAccessToken, 
+  generateRefreshToken, 
+  verifyToken,
+  setTokenCookies,
+  clearTokenCookies
+} = require('../utils/jwt');
 const { sendEmail, getPasswordResetUrl } = require('../utils/email');
-const { hashPassword, comparePassword, generateResetToken } = require('../utils/helpers');
+const { comparePassword, generateResetToken } = require('../utils/helpers');
 const logger = require('../config/logger');
 
 const register = async (req, res, next) => {
@@ -21,10 +26,15 @@ const register = async (req, res, next) => {
     user.refreshToken = refreshToken;
     await user.save();
 
+    // Set cookies
+    setTokenCookies(res, accessToken, refreshToken);
+
+    // For backward compatibility, still return tokens in response
     res.status(201).json({
+      success: true,
       user: { id: user._id, name, email, role },
-      accessToken,
-      refreshToken
+      accessToken,  // Keep for backward compatibility
+      refreshToken  // Keep for backward compatibility
     });
   } catch (error) {
     logger.error('Auth register error:', error);
@@ -36,6 +46,7 @@ const login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
     const user = await User.findOne({ email }).select('+password +refreshToken');
+    
     if (!user || !(await comparePassword(password, user.password))) {
       return res.status(401).json({ message: 'Invalid email or password.' });
     }
@@ -46,10 +57,20 @@ const login = async (req, res, next) => {
     user.refreshToken = refreshToken;
     await user.save();
 
+    // Set cookies
+    setTokenCookies(res, accessToken, refreshToken);
+
     res.json({
-      accessToken,
-      refreshToken,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role }
+      success: true,
+      accessToken,   // Keep for backward compatibility
+      refreshToken,  // Keep for backward compatibility
+      user: { 
+        id: user._id, 
+        name: user.name, 
+        email: user.email, 
+        role: user.role,
+        class: user.class 
+      }
     });
   } catch (error) {
     logger.error('Auth login error:', error);
@@ -59,11 +80,17 @@ const login = async (req, res, next) => {
 
 const refreshToken = async (req, res, next) => {
   try {
-    const { refreshToken: token } = req.body;
-    if (!token) return res.status(400).json({ message: 'Refresh token required.' });
+    // Try to get refresh token from cookies first, then from request body
+    const token = req.cookies.refreshToken || req.body.refreshToken;
+    
+    if (!token) {
+      return res.status(400).json({ message: 'Refresh token required.' });
+    }
 
     const decoded = verifyToken(token, process.env.REFRESH_TOKEN_SECRET);
-    if (!decoded) return res.status(401).json({ message: 'Invalid refresh token.' });
+    if (!decoded) {
+      return res.status(401).json({ message: 'Invalid refresh token.' });
+    }
 
     const user = await User.findById(decoded.id).select('+refreshToken');
     if (!user || user.refreshToken !== token) {
@@ -71,7 +98,22 @@ const refreshToken = async (req, res, next) => {
     }
 
     const accessToken = generateAccessToken(user._id, user.role);
-    res.json({ accessToken });
+    
+    // Update access token cookie
+    const isProduction = process.env.NODE_ENV === 'production';
+    res.cookie('accessToken', accessToken, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: process.env.COOKIE_SAMESITE || 'lax',
+      domain: isProduction ? process.env.COOKIE_DOMAIN : undefined,
+      path: '/',
+      maxAge: 15 * 60 * 1000
+    });
+
+    res.json({ 
+      success: true,
+      accessToken  // Keep for backward compatibility
+    });
   } catch (error) {
     logger.error('Refresh token error:', error);
     next(error);
@@ -129,7 +171,10 @@ const resetPassword = async (req, res, next) => {
 
 const getProfile = async (req, res, next) => {
   try {
-    const user = await User.findById(req.user.id).select('-password -refreshToken');
+    const user = await User.findById(req.user.id)
+      .select('-password -refreshToken')
+      .populate('class', 'name code');
+      
     if (!user) {
       return res.status(404).json({ message: 'User not found.' });
     }
@@ -144,14 +189,21 @@ const updateProfile = async (req, res, next) => {
   try {
     const { name, email } = req.body;
     const updates = { name };
+    
     if (email && email !== req.user.email) {
       const existing = await User.findOne({ email });
-      if (existing) return res.status(400).json({ message: 'Email already in use.' });
+      if (existing) {
+        return res.status(400).json({ message: 'Email already in use.' });
+      }
       updates.email = email;
     }
 
-    const user = await User.findByIdAndUpdate(req.user.id, updates, { new: true, runValidators: true })
-      .select('-password -refreshToken');
+    const user = await User.findByIdAndUpdate(
+      req.user.id, 
+      updates, 
+      { new: true, runValidators: true }
+    ).select('-password -refreshToken');
+
     res.json(user);
   } catch (error) {
     logger.error('Update profile error:', error);
@@ -161,11 +213,46 @@ const updateProfile = async (req, res, next) => {
 
 const logout = async (req, res, next) => {
   try {
-    await User.findByIdAndUpdate(req.user.id, { refreshToken: null });
+    // Clear refresh token from database
+    if (req.user) {
+      await User.findByIdAndUpdate(req.user.id, { refreshToken: null });
+    }
+    
+    // Clear cookies
+    clearTokenCookies(res);
+
     res.json({ message: 'Logged out successfully.' });
   } catch (error) {
     logger.error('Logout error:', error);
-    next(error);
+    // Still clear cookies even if database update fails
+    clearTokenCookies(res);
+    res.json({ message: 'Logged out successfully.' });
+  }
+};
+
+// New endpoint to check authentication status
+const checkAuth = async (req, res) => {
+  try {
+    // User is already attached by protect middleware
+    res.json({
+      success: true,
+      authenticated: true,
+      user: {
+        id: req.user._id,
+        name: req.user.name,
+        email: req.user.email,
+        role: req.user.role,
+        class: req.user.class,
+        createdAt: req.user.createdAt
+      }
+    });
+  } catch (error) {
+    logger.error('Check auth error:', error);
+    res.status(401).json({ 
+      success: false,
+      authenticated: false, 
+      message: 'Not authenticated' 
+    });
   }
 };
 
@@ -177,5 +264,6 @@ module.exports = {
   resetPassword,
   getProfile,
   updateProfile,
-  logout
+  logout,
+  checkAuth
 };

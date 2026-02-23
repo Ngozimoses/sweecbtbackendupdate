@@ -60,76 +60,160 @@ const getClassResults = async (req, res) => {
   }
 };
 // controllers/result.controller.js
-// controllers/result.controller.js
+// controllers/result.controller.js - Fixed gradeSubmission function
 const gradeSubmission = async (req, res) => {
   try {
     const { feedback, status, answers } = req.body;
     const { id: submissionId } = req.params;
 
-    // Find submission
-    const submission = await Submission.findById(submissionId);
+    // Find submission and populate exam with questions
+    const submission = await Submission.findById(submissionId)
+      .populate({
+        path: 'exam',
+        select: 'questions totalMarks passingMarks title',
+        populate: {
+          path: 'questions.question',
+          select: 'text points correctAnswer type'
+        }
+      });
+
     if (!submission) {
       return res.status(404).json({ message: 'Submission not found.' });
     }
 
-    // Update answers if provided
-    if (answers && Array.isArray(answers)) {
-      submission.answers = answers.map((updatedAns, index) => {
-        const existingAns = submission.answers[index];
-        if (existingAns) {
-          return {
-            ...existingAns.toObject(),
-            awardedMarks: updatedAns.awardedMarks || 0,
-            reviewed: updatedAns.reviewed !== undefined ? updatedAns.reviewed : true
-          };
-        }
-        return existingAns;
-      });
-    }
-
-    // ✅ FETCH EXAM TO GET QUESTION POINTS
-    const exam = await Exam.findById(submission.exam).select('questions totalMarks');
+    const exam = submission.exam;
     if (!exam) {
       return res.status(404).json({ message: 'Exam not found.' });
     }
 
-    // ✅ RECALCULATE TOTAL SCORE FROM AWARDED MARKS
-    let totalScore = 0;
-    submission.answers.forEach((ans) => {
-      // Find the question reference in the exam
-      const examQuestionRef = exam.questions.find(
-        eq => eq.question.toString() === ans.question.toString()
-      );
-      const points = examQuestionRef ? examQuestionRef.points : 1;
-
-      if (ans.reviewed === true) {
-        if (ans.awardedMarks !== undefined) {
-          // Use teacher-assigned marks (clamped to max points)
-          totalScore += Math.min(ans.awardedMarks, points);
-        } else if (ans.isCorrect === true) {
-          // Auto-graded correct answer
-          totalScore += points;
-        }
-        // If isCorrect is false or awardedMarks is 0, add nothing
+    // Create a map of question IDs to their points
+    const questionPointsMap = new Map();
+    exam.questions.forEach(q => {
+      const questionId = q.question?._id?.toString() || q.question?.toString();
+      if (questionId) {
+        questionPointsMap.set(questionId, q.points || 1);
       }
-      // If not reviewed, don't count it (shouldn't happen in 'graded' status)
     });
 
-    // ✅ SAVE THE CORRECT TOTAL SCORE
+    console.log('Question points map:', Object.fromEntries(questionPointsMap));
+
+    // Update answers if provided by teacher
+    if (answers && Array.isArray(answers)) {
+      submission.answers = submission.answers.map((existingAns, index) => {
+        const updatedAns = answers[index];
+        if (updatedAns) {
+          const questionId = existingAns.question?.toString();
+          const maxPoints = questionPointsMap.get(questionId) || 1;
+          
+          // Calculate awarded marks properly
+          let awardedMarks = 0;
+          
+          if (updatedAns.awardedMarks !== undefined && updatedAns.awardedMarks !== null) {
+            // Use teacher-assigned marks
+            awardedMarks = Math.min(
+              Math.max(Number(updatedAns.awardedMarks) || 0, 0), 
+              maxPoints
+            );
+          } else if (updatedAns.isCorrect === true) {
+            // Auto-graded correct answer - give full points
+            awardedMarks = maxPoints;
+          } else if (existingAns.isCorrect === true) {
+            // If existing answer was correct but no new marks, give full points
+            awardedMarks = maxPoints;
+          }
+
+          return {
+            ...existingAns.toObject(),
+            awardedMarks,
+            reviewed: updatedAns.reviewed !== undefined ? updatedAns.reviewed : true,
+            isCorrect: updatedAns.isCorrect !== undefined ? updatedAns.isCorrect : (awardedMarks === maxPoints),
+            feedback: updatedAns.feedback || existingAns.feedback
+          };
+        }
+        return existingAns;
+      });
+    } else {
+      // If no answers provided by teacher, auto-grade based on isCorrect flag
+      submission.answers = submission.answers.map(ans => {
+        const questionId = ans.question?.toString();
+        const maxPoints = questionPointsMap.get(questionId) || 1;
+        
+        // Calculate awarded marks based on isCorrect
+        let awardedMarks = 0;
+        if (ans.isCorrect === true) {
+          awardedMarks = maxPoints;
+        }
+        
+        return {
+          ...ans.toObject(),
+          awardedMarks,
+          reviewed: ans.reviewed || true
+        };
+      });
+    }
+
+    // Recalculate total score
+    let totalScore = 0;
+    submission.answers.forEach((ans, index) => {
+      totalScore += ans.awardedMarks || 0;
+      console.log(`Question ${index + 1}: awardedMarks = ${ans.awardedMarks}, total so far = ${totalScore}`);
+    });
+
+    // Calculate max total points from exam
+    const maxTotalPoints = exam.totalMarks || exam.questions.reduce((sum, q) => {
+      const points = q.points || 1;
+      return sum + points;
+    }, 0);
+
+    console.log('Total Score:', totalScore);
+    console.log('Max Total Points:', maxTotalPoints);
+
+    // Calculate percentage
+    const percentage = maxTotalPoints > 0 ? (totalScore / maxTotalPoints) * 100 : 0;
+
+    // Determine pass/fail
+    const passingPercentage = exam.passingMarks || 40;
+    const passed = percentage >= passingPercentage;
+
+    // Update submission
     submission.totalScore = totalScore;
-    submission.feedback = feedback;
+    submission.percentage = Math.round(percentage * 100) / 100;
+    submission.passed = passed;
+    submission.feedback = feedback || submission.feedback;
     submission.status = status || 'graded';
     submission.gradedBy = req.user.id;
+    submission.gradedAt = new Date();
     
     await submission.save();
 
-    res.json(submission);
+    // Return enhanced response
+    res.json({
+      status: 'success',
+      data: {
+        submission: {
+          ...submission.toObject(),
+          totalScore,
+          percentage: submission.percentage,
+          passed,
+          maxScore: maxTotalPoints,
+          answerDetails: submission.answers.map((ans, index) => ({
+            questionNumber: index + 1,
+            awardedMarks: ans.awardedMarks,
+            maxPoints: questionPointsMap.get(ans.question?.toString()) || 1,
+            isCorrect: ans.isCorrect
+          }))
+        }
+      }
+    });
+
   } catch (error) {
     console.error('Grade submission error:', error);
-    res.status(400).json({ message: error.message });
+    res.status(400).json({ 
+      status: 'error',
+      message: error.message 
+    });
   }
 };
-
 const publishExamResults = async (req, res) => {
   try {
     await Submission.updateMany(

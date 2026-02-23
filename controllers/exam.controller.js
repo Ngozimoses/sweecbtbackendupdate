@@ -5,6 +5,7 @@ const Question = require('../models/Question');
 const User = require('../models/User');
 const Subject = require('../models/Subject');
 const Submission = require('../models/Submission');
+const mongoose = require('mongoose'); 
 // Add this helper at top
 const getNowUTC = () => {
   const now = new Date();
@@ -62,6 +63,7 @@ const getAllExams = async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch exams.' });
   }
 };
+// controllers/exam.controller.js - Update createExam and getExamById
 
 const createExam = async (req, res) => {
   try {
@@ -100,31 +102,71 @@ const createExam = async (req, res) => {
     const subj = await Subject.findById(subject);
     if (!subj) throw new Error('Subject not found.');
 
-    // ✅ Create all questions FIRST
+    // Create all questions FIRST
     const savedQuestionIds = [];
+    const questionRefs = [];
+
     for (const q of questions) {
-      const options = q.type === 'short_answer' ? [] : q.options;
+      let questionData;
+      
+      if (q.type === 'comprehension') {
+        // Handle comprehension passage
+        questionData = {
+          type: 'comprehension',
+          text: q.passage || '', // Store passage in text field for backward compatibility
+          passage: {
+            title: q.title || '',
+            content: q.passage || '',
+            diagrams: q.diagrams || []
+          },
+          comprehensionQuestions: q.questions.map(subQ => ({
+            ...subQ,
+            _id: subQ.id || new mongoose.Types.ObjectId(),
+            options: subQ.options?.map(opt => ({
+              text: opt.text || '',
+              isCorrect: opt.isCorrect || false,
+              imageUrl: opt.imageUrl || null
+            })) || []
+          })),
+          subject,
+          createdBy: req.user.id,
+          difficulty: 'medium',
+          points: q.totalMarks || q.questions.reduce((sum, subQ) => sum + (subQ.marks || 1), 0)
+        };
+      } else {
+        // Handle regular question
+        questionData = {
+          type: q.type,
+          text: q.text,
+          diagrams: q.diagrams || [],
+          imageUrl: q.imageUrl || null,
+          subject,
+          createdBy: req.user.id,
+          difficulty: 'medium',
+          options: q.options?.map(opt => ({
+            text: opt.text || '',
+            isCorrect: opt.isCorrect || false,
+            imageUrl: opt.imageUrl || null
+          })) || [],
+          points: q.marks || 1
+        };
+      }
 
-      const question = new Question({
-        type: q.type,
-        text: q.text,
-        subject,
-        createdBy: req.user.id,
-        difficulty: 'medium',
-        options,
-        points: q.marks
-      });
-
+      const question = new Question(questionData);
       const savedQuestion = await question.save();
       savedQuestionIds.push(savedQuestion._id);
+      
+      questionRefs.push({
+        question: savedQuestion._id,
+        points: q.type === 'comprehension' ? (q.totalMarks || 1) : (q.marks || 1),
+        // For comprehension, include which sub-questions are included
+        ...(q.type === 'comprehension' && {
+          includedSubQuestions: savedQuestion.comprehensionQuestions.map(sq => sq._id)
+        })
+      });
     }
 
-    // ✅ Create exam with questions in SINGLE operation
-    const questionRefs = questions.map((q, index) => ({
-      question: savedQuestionIds[index],
-      points: q.marks
-    }));
-
+    // Create exam with questions
     const exam = new Exam({
       title,
       class: classId,
@@ -140,15 +182,16 @@ const createExam = async (req, res) => {
       totalQuestions: questions.length,
       createdBy: req.user.id,
       status: 'draft',
-      questions: questionRefs // 👈 Include questions from the start
+      questions: questionRefs
     });
 
-    await exam.save(); // 👈 Only ONE save operation
+    await exam.save();
 
     const populatedExam = await Exam.findById(exam._id)
-      .populate('class', 'name code')
-      .populate('subject', 'name')
-      .populate('createdBy', 'name');
+      .populate('class', 'name code section')
+      .populate('subject', 'name code')
+      .populate('createdBy', 'name')
+      .populate('questions.question', 'text type options diagrams passage comprehensionQuestions totalMarks');
 
     res.status(201).json(populatedExam);
   } catch (error) {
@@ -156,263 +199,251 @@ const createExam = async (req, res) => {
     res.status(400).json({ message: error.message || 'Failed to create exam.' });
   }
 };
-// controllers/exam.controller.js
 
-// In controllers/exam.controller.js - submitExam function
-
-const submitExam = async (req, res) => {
-  try {
-    const examId = req.params.id;
-    const studentId = req.user.id;
-    const { error, value } = require('../validators/exam.validator').submitExamSchema.validate(req.body);
-    if (error) {
-      return res.status(400).json({ message: error.details[0].message });
-    }
-    const { answers, timeSpent, warnings = [] } = value;
-
-    // 1. Validate exam exists and is published
-    const exam = await Exam.findById(examId).select('title duration questions status totalMarks');
-    if (!exam || exam.status !== 'published') {
-      return res.status(400).json({ message: 'Exam not available for submission' });
-    }
-
-    // 2. Validate exam has questions
-    if (!exam.questions || exam.questions.length === 0) {
-      return res.status(400).json({ message: 'Exam contains no questions' });
-    }
-
-    // 3. Find ONLY draft submission
-    let submission = await Submission.findOne({
-      exam: examId,
-      student: studentId,
-      status: 'draft'
-    });
-
-    // If no draft exists, reject (startExam should have created one)
-    if (!submission) {
-      return res.status(400).json({ message: 'No active exam session found. Please start the exam first.' });
-    }
-
-    // 4. Validate answers reference valid question IDs
-    const questionIds = exam.questions.map(q => q.question.toString());
-    const submittedQuestionIds = answers.map(a => a.question);
-
-    for (const id of submittedQuestionIds) {
-      if (!questionIds.includes(id)) {
-        return res.status(400).json({ message: `Invalid question ID: ${id}` });
-      }
-    }
-
-    // 5. Ensure all questions are represented (even unanswered)
-    const normalizedAnswers = exam.questions.map(examQ => {
-      const ans = answers.find(a => a.question === examQ.question.toString());
-      return {
-        question: examQ.question.toString(),
-        answer: ans?.answer || ''
-      };
-    });
-
-    // 6. Fetch full question data
-    const fullQuestionIds = exam.questions.map(q => q.question);
-    const fullQuestions = await Question.find({ _id: { $in: fullQuestionIds } });
-    const questionMap = {};
-    fullQuestions.forEach(q => {
-      questionMap[q._id.toString()] = q;
-    });
-
-    // 7. Score answers — NEVER auto-grade short_answer
-   // 7. Score answers
-let totalScore = 0;
-const maxScore = exam.totalMarks;
-
-const scoredAnswers = exam.questions.map(examQ => {
-  const ans = normalizedAnswers.find(a => a.question === examQ.question.toString());
-  const fullQuestion = questionMap[examQ.question.toString()];
-  const answerText = ans?.answer || '';
-
-  if (!fullQuestion) {
-    // Deleted question - no points, but doesn't block auto-grading
-    return {
-      question: examQ.question,
-      answer: answerText,
-      isCorrect: null,
-      reviewed: true // ← Mark as reviewed since it doesn't need grading
-    };
-  }
-
-  // Get actual points for this question
-  const questionPoints = examQ.points || 0;
-
-  // Handle MCQ / True-False
-  if (fullQuestion.type === 'multiple_choice' || fullQuestion.type === 'true_false') {
-    const correctOption = fullQuestion.options.find(opt => opt.isCorrect);
-    const isCorrect = correctOption && answerText === correctOption.text;
-    if (isCorrect) {
-      totalScore += questionPoints;
-    }
-    return {
-      question: examQ.question,
-      answer: answerText,
-      isCorrect,
-      reviewed: true
-    };
-  }
-
-  // Non-MCQ questions (short_answer, essay, etc.)
-  return {
-    question: examQ.question,
-    answer: answerText,
-    isCorrect: null,
-    reviewed: false
-  };
-});
-
-// 8. Determine final status - KEY CHANGE HERE
-const allQuestionsAreAutoGraded = exam.questions.every(examQ => {
-  const fullQuestion = questionMap[examQ.question.toString()];
-  if (!fullQuestion) return true; // Deleted questions don't prevent auto-grading
-  
-  return fullQuestion.type === 'multiple_choice' || fullQuestion.type === 'true_false';
-});
-
-const finalStatus = allQuestionsAreAutoGraded ? 'graded' : 'submitted';
-
-// 9. Update the draft submission
-submission.answers = scoredAnswers;
-submission.timeSpent = timeSpent;
-submission.warnings = warnings;
-submission.totalScore = totalScore;
-submission.maxScore = maxScore;
-submission.status = finalStatus;
-submission.submittedAt = new Date();
-
-await submission.save();
-
-    return res.status(201).json({
-      message: 'Exam submitted successfully',
-      submission: {
-        id: submission._id,
-        totalScore: submission.totalScore,
-        maxScore: submission.maxScore,
-        status: submission.status,
-        submittedAt: submission.submittedAt
-      }
-    });
-  } catch (error) {
-    console.error('Submission error:', error);
-    return res.status(500).json({
-      message: 'Internal server error during submission',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-};
 const getExamById = async (req, res) => {
   try {
     const exam = await Exam.findById(req.params.id)
       .select('+questions')
       .populate('class', 'name section code')
       .populate('subject', 'name code')
-      .populate('createdBy', 'name');
+      .populate('createdBy', 'name')
+      .populate('questions.question', 'text type options diagrams imageUrl passage comprehensionQuestions points totalMarks');
 
-    if (!exam) return res.status(404).json({ message: 'Exam not found.' });
-
-    // ✅ ALWAYS include questions - no user role checking
-   // ✅ ALWAYS include questions - no user role checking
-let finalQuestions = [];
-
-if (exam.questions && exam.questions.length > 0) {
-  console.log("🔍 POPULATION STARTED - Raw exam questions:", exam.questions);
-  
-  const questionIds = exam.questions.map(q => q.question);
-  console.log("🔍 Question IDs to fetch:", questionIds);
-  
-  const fullQuestions = await Question.find({ 
-    _id: { $in: questionIds } 
-  }).select('text type options');
-  
-  console.log("🔍 Fetched full questions count:", fullQuestions.length);
-  console.log("🔍 Full questions data:", JSON.stringify(fullQuestions, null, 2));
-  
-  const questionMap = {};
-  fullQuestions.forEach(q => {
-    questionMap[q._id.toString()] = q;
-  });
-  
-  console.log("🔍 Question map keys:", Object.keys(questionMap));
-  
-  // Create NEW array with populated questions
-  finalQuestions = exam.questions.map(eq => {
-    const qId = eq.question.toString();
-    const fullQ = questionMap[qId];
-    console.log("🔍 Processing question ID:", qId, "Found:", !!fullQ);
-    
-    if (!fullQ) {
-      console.log("❌ Question not found in map:", qId);
-      return {
-        _id: qId,
-        text: '[Deleted Question]',
-        type: 'deleted',
-        options: [],
-        marks: eq.points,
-        isDeleted: true
-      };
+    if (!exam) {
+      return res.status(404).json({ message: 'Exam not found.' });
     }
-    const transformedQuestion = {
-      _id: fullQ._id.toString(), // Ensure it's a string
-      type: fullQ.type,
-      text: fullQ.text,
-      options: fullQ.options || [],
-      marks: eq.points
+
+    // Transform questions for frontend
+    const transformedQuestions = exam.questions.map(eq => {
+      const question = eq.question;
+      
+      if (question.type === 'comprehension') {
+        // For comprehension passages, return the passage and its questions
+        return {
+          id: question._id,
+          type: 'comprehension',
+          title: question.passage?.title || '',
+          passage: question.passage?.content || question.text,
+          diagrams: question.passage?.diagrams || question.diagrams || [],
+          questions: question.comprehensionQuestions?.map(subQ => ({
+            id: subQ._id,
+            type: subQ.type,
+            text: subQ.text,
+            marks: subQ.marks || 1,
+            options: subQ.options?.map(opt => ({
+              text: opt.text,
+              isCorrect: opt.isCorrect,
+              imageUrl: opt.imageUrl
+            })) || [],
+            diagrams: subQ.diagrams || [],
+            imageUrl: subQ.imageUrl
+          })) || [],
+          totalMarks: question.totalMarks || eq.points
+        };
+      } else {
+        // Regular question
+        return {
+          id: question._id,
+          type: question.type,
+          text: question.text,
+          marks: eq.points || question.points || 1,
+          options: question.options?.map(opt => ({
+            text: opt.text,
+            isCorrect: opt.isCorrect,
+            imageUrl: opt.imageUrl
+          })) || [],
+          diagrams: question.diagrams || [],
+          imageUrl: question.imageUrl
+        };
+      }
+    });
+
+    const response = {
+      _id: exam._id,
+      title: exam.title,
+      class: exam.class,
+      subject: exam.subject,
+      createdBy: exam.createdBy,
+      duration: exam.duration,
+      totalQuestions: exam.totalQuestions,
+      passingMarks: exam.passingMarks,
+      totalMarks: exam.totalMarks,
+      shuffleQuestions: exam.shuffleQuestions,
+      showResults: exam.showResults,
+      status: exam.status,
+      scheduledAt: exam.scheduledAt,
+      endsAt: exam.endsAt,
+      instructions: exam.instructions,
+      totalStudents: exam.totalStudents,
+      completed: exam.completed,
+      publishedAt: exam.publishedAt,
+      createdAt: exam.createdAt,
+      updatedAt: exam.updatedAt,
+      startDate: exam.scheduledAt,
+      endDate: exam.endsAt,
+      questions: transformedQuestions
     };
-    console.log("✅ Transformed question:", JSON.stringify(transformedQuestion, null, 2));
-    return transformedQuestion;
-  });
-} else {
-  console.log("❌ No questions found in exam");
-}
 
-// ✅ Create a clean response object
-const response = {
-  _id: exam._id,
-  title: exam.title,
-  class: exam.class,
-  subject: exam.subject,
-  createdBy: exam.createdBy,
-  duration: exam.duration,
-  totalQuestions: exam.totalQuestions,
-  passingMarks: exam.passingMarks,
-  totalMarks: exam.totalMarks,
-  shuffleQuestions: exam.shuffleQuestions,
-  showResults: exam.showResults,
-  status: exam.status,
-  scheduledAt: exam.scheduledAt,
-  endsAt: exam.endsAt,
-  instructions: exam.instructions,
-  totalStudents: exam.totalStudents,
-  completed: exam.completed,
-  publishedAt: exam.publishedAt,
-  createdAt: exam.createdAt,
-  updatedAt: exam.updatedAt,
-  startDate: exam.scheduledAt,
-  endDate: exam.endsAt,
-  questions: finalQuestions // ✅ Use the new array, not exam.questions
-};
-
-   console.log("✅ FINAL RESPONSE QUESTIONS:", JSON.stringify(response.questions, null, 2));
-res.json(response);
-
+    res.json(response);
   } catch (error) {
     console.error('Get exam error:', error);
     res.status(500).json({ message: 'Failed to fetch exam.' });
   }
 };
-// ✅ SECURE UPDATE: Only allow safe fields
+
+// In controllers/exam.controller.js - Update submitExam function
+const submitExam = async (req, res) => {
+  try {
+    const examId = req.params.id;
+    const studentId = req.user.id;
+    const { answers, timeSpent, warnings = [] } = req.body;
+
+    console.log('Submit exam - timeSpent received:', timeSpent, 'type:', typeof timeSpent);
+
+    // Validate exam exists
+    const exam = await Exam.findById(examId)
+      .populate('questions.question', 'type options comprehensionQuestions points');
+
+    if (!exam || exam.status !== 'published') {
+      return res.status(400).json({ message: 'Exam not available for submission' });
+    }
+
+    // Find draft submission
+    let submission = await Submission.findOne({
+      exam: examId,
+      student: studentId,
+      status: 'draft'
+    });
+
+    if (!submission) {
+      return res.status(400).json({ message: 'No active exam session found.' });
+    }
+
+    // FIX: Convert timeSpent from milliseconds to seconds if needed
+    let finalTimeSpent = timeSpent;
+    
+    // If timeSpent is greater than exam duration in seconds * 1000, 
+    // it's likely in milliseconds
+    const examDurationSeconds = exam.duration * 60;
+    if (finalTimeSpent > examDurationSeconds * 2) {
+      console.log('Converting timeSpent from ms to seconds:', finalTimeSpent);
+      finalTimeSpent = Math.floor(finalTimeSpent / 1000);
+    }
+    
+    // Ensure timeSpent doesn't exceed exam duration
+    finalTimeSpent = Math.min(finalTimeSpent, examDurationSeconds);
+    
+    console.log('Final timeSpent (seconds):', finalTimeSpent);
+
+    // Score answers
+    let totalScore = 0;
+    const maxScore = exam.totalMarks;
+    const scoredAnswers = [];
+
+    for (const answer of answers) {
+      const examQuestion = exam.questions.find(
+        eq => eq.question._id.toString() === answer.questionId
+      );
+
+      if (!examQuestion) continue;
+
+      const question = examQuestion.question;
+      let marksObtained = 0;
+      let isCorrect = null;
+      let reviewed = true;
+
+      if (question.type === 'comprehension' && answer.subQuestionId) {
+        // Handle comprehension sub-question
+        const subQuestion = question.comprehensionQuestions.find(
+          sq => sq._id.toString() === answer.subQuestionId
+        );
+
+        if (subQuestion) {
+          if (subQuestion.type === 'multiple_choice' || subQuestion.type === 'true_false') {
+            const correctOption = subQuestion.options.find(opt => opt.isCorrect);
+            isCorrect = correctOption && answer.answer === correctOption.text;
+            marksObtained = isCorrect ? (subQuestion.marks || 1) : 0;
+            totalScore += marksObtained;
+          } else {
+            reviewed = false;
+            isCorrect = null;
+          }
+        }
+      } else {
+        // Regular question
+        if (question.type === 'multiple_choice' || question.type === 'true_false') {
+          const correctOption = question.options.find(opt => opt.isCorrect);
+          isCorrect = correctOption && answer.answer === correctOption.text;
+          marksObtained = isCorrect ? (examQuestion.points || 1) : 0;
+          totalScore += marksObtained;
+        } else {
+          reviewed = false;
+          isCorrect = null;
+        }
+      }
+
+      scoredAnswers.push({
+        question: examQuestion.question._id,
+        subQuestionId: answer.subQuestionId || null,
+        answer: answer.answer || '',
+        isCorrect,
+        marksObtained,
+        reviewed
+      });
+    }
+
+    // Check if all questions are auto-graded
+    const allQuestionsAutoGraded = exam.questions.every(eq => {
+      if (eq.question.type === 'comprehension') {
+        return eq.question.comprehensionQuestions.every(
+          sq => sq.type === 'multiple_choice' || sq.type === 'true_false'
+        );
+      }
+      return eq.question.type === 'multiple_choice' || eq.question.type === 'true_false';
+    });
+
+    // Update submission
+    submission.answers = scoredAnswers;
+    submission.timeSpent = finalTimeSpent; // Now in seconds
+    submission.warnings = warnings;
+    submission.totalScore = totalScore;
+    submission.maxScore = maxScore;
+    submission.status = allQuestionsAutoGraded ? 'graded' : 'submitted';
+    submission.submittedAt = new Date();
+
+    await submission.save();
+
+    console.log('Submission saved with timeSpent:', finalTimeSpent, 'seconds');
+
+    res.status(201).json({
+      message: 'Exam submitted successfully',
+      submission: {
+        id: submission._id,
+        totalScore: submission.totalScore,
+        maxScore: submission.maxScore,
+        status: submission.status,
+        submittedAt: submission.submittedAt,
+        timeSpent: submission.timeSpent
+      }
+    });
+  } catch (error) {
+    console.error('Submission error:', error);
+    res.status(500).json({ message: 'Internal server error during submission' });
+  }
+};
 const updateExam = async (req, res) => {
   try {
+    // Include ALL updatable fields including dates
     const updatableFields = [
-      'title', 'duration', 'instructions', 
-      'passingMarks', 'totalMarks', 
-      'shuffleQuestions', 'showResults'
+      'title', 
+      'duration', 
+      'instructions', 
+      'passingMarks', 
+      'totalMarks', 
+      'shuffleQuestions', 
+      'showResults',
+      'scheduledAt',  // ✅ ADD THIS
+      'endsAt'        // ✅ ADD THIS
     ];
     
     const updateData = {};
@@ -422,19 +453,39 @@ const updateExam = async (req, res) => {
       }
     });
 
+    // Optional: Validate dates if both are being updated
+    if (updateData.scheduledAt && updateData.endsAt) {
+      const start = new Date(updateData.scheduledAt);
+      const end = new Date(updateData.endsAt);
+      
+      if (end <= start) {
+        return res.status(400).json({ 
+          message: 'End date must be after start date' 
+        });
+      }
+    }
+
     const exam = await Exam.findByIdAndUpdate(
       req.params.id,
       updateData,
       { new: true, runValidators: true }
-    );
+    ).populate('class subject createdBy');
     
-    if (!exam) return res.status(404).json({ message: 'Exam not found.' });
-    res.json(exam);
+    if (!exam) {
+      return res.status(404).json({ message: 'Exam not found.' });
+    }
+    
+    // Add startDate/endDate aliases for frontend compatibility
+    const response = exam.toObject();
+    response.startDate = exam.scheduledAt;
+    response.endDate = exam.endsAt;
+    
+    res.json(response);
   } catch (error) {
+    console.error('Update exam error:', error);
     res.status(400).json({ message: error.message });
   }
 };
-
  
 
 const deleteExam = async (req, res) => {
@@ -499,26 +550,123 @@ const getActiveExams = async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch active exams.' });
   }
 };
-
-// In exam.controller.js - getStudentExamResult
+ 
 const getStudentExamResult = async (req, res) => {
   try {
+    const { id: examId } = req.params;
+    const studentId = req.user.id;
+
     // Find the submission for this student and exam
     const submission = await Submission.findOne({
-      exam: req.params.id,
-      student: req.user.id
+      exam: examId,
+      student: studentId
     })
-    .populate('exam', 'title subject passingMarks maxScore')
-    .populate('exam.subject', 'name')
-    .populate('answers.question', 'text');
+    .populate({
+      path: 'exam',
+      select: 'title subject passingMarks totalMarks questions showResults',
+      populate: {
+        path: 'questions.question',
+        select: 'text type points options correctAnswer'
+      }
+    })
+    .populate('answers.question', 'text type points');
 
-    if (!submission) return res.status(404).json({ message: 'Submission not found.' });
-    res.json(submission);
+    if (!submission) {
+      return res.status(404).json({ message: 'Submission not found.' });
+    }
+
+    // Check if results should be shown
+    if (submission.exam && submission.exam.showResults === false) {
+      return res.json({
+        _id: submission._id,
+        exam: {
+          _id: submission.exam._id,
+          title: submission.exam.title,
+          subject: submission.exam.subject,
+          showResults: false
+        },
+        status: submission.status,
+        submittedAt: submission.submittedAt || submission.createdAt,
+        message: 'Results are not yet published'
+      });
+    }
+
+    // Create a map of question IDs to their max points from the exam
+    const questionPointsMap = new Map();
+    if (submission.exam && submission.exam.questions) {
+      submission.exam.questions.forEach(q => {
+        const questionId = q.question?._id?.toString() || q.question?.toString();
+        if (questionId) {
+          questionPointsMap.set(questionId, q.points || 1);
+        }
+      });
+    }
+
+    // Process answers to ensure awardedMarks is set correctly
+    const processedAnswers = submission.answers.map((ans, index) => {
+      const questionId = ans.question?._id?.toString() || ans.question?.toString();
+      const maxPoints = questionPointsMap.get(questionId) || 1;
+      
+      // Ensure awardedMarks is set
+      let awardedMarks = ans.awardedMarks;
+      
+      // If awardedMarks is not set but answer is correct, set to max points
+      if ((awardedMarks === undefined || awardedMarks === null || awardedMarks === 0) && ans.isCorrect === true) {
+        awardedMarks = maxPoints;
+      }
+      
+      // If still undefined, default to 0
+      if (awardedMarks === undefined || awardedMarks === null) {
+        awardedMarks = 0;
+      }
+
+      return {
+        ...ans.toObject(),
+        awardedMarks,
+        maxPoints,
+        question: ans.question ? {
+          ...ans.question.toObject(),
+          points: maxPoints
+        } : null
+      };
+    });
+
+    // Calculate max score
+    const maxScore = submission.maxScore || 
+                    submission.exam?.totalMarks || 
+                    Array.from(questionPointsMap.values()).reduce((sum, points) => sum + points, 0);
+
+    // Create the response object
+    const responseData = {
+      _id: submission._id,
+      exam: {
+        _id: submission.exam?._id,
+        title: submission.exam?.title || 'Exam',
+        subject: submission.exam?.subject || null,
+        passingMarks: submission.exam?.passingMarks,
+        totalMarks: maxScore,
+        showResults: submission.exam?.showResults
+      },
+      answers: processedAnswers,
+      totalScore: submission.totalScore || 0,
+      maxScore: maxScore,
+      percentage: maxScore > 0 ? ((submission.totalScore || 0) / maxScore) * 100 : 0,
+      status: submission.status,
+      startedAt: submission.startTime,
+      submittedAt: submission.submittedAt || submission.createdAt,
+      gradedAt: submission.gradedAt,
+      feedback: submission.feedback,
+      timeSpent: submission.timeSpent,
+      createdAt: submission.createdAt,
+      updatedAt: submission.updatedAt
+    };
+
+    res.json(responseData);
   } catch (error) {
+    console.error('Get student exam result error:', error);
     res.status(500).json({ message: 'Failed to fetch result.' });
   }
 };
-
 const isExamActive = (exam) => {
   const now = getNowUTC();
   return new Date(exam.scheduledAt) <= now && now <= new Date(exam.endsAt);
@@ -547,37 +695,107 @@ const getExamSubmissions = async (req, res) => {
   }
 };
 // In controllers/exam.controller.js
+// controllers/exam.controller.js - Update startExam function
+
+// controllers/exam.controller.js - Fixed startExam function
 const startExam = async (req, res) => {
   try {
     const { id: examId } = req.params;
     const studentId = req.user.id;
 
+    console.log('=== START EXAM DEBUG ===');
+    console.log('Exam ID:', examId);
+    console.log('Student ID:', studentId);
+
     // 1. Validate exam exists and is published
     const exam = await Exam.findById(examId);
-    if (!exam || exam.status !== 'published') {
+    if (!exam) {
+      return res.status(404).json({ message: 'Exam not found.' });
+    }
+    
+    if (exam.status !== 'published') {
       return res.status(400).json({ message: 'Exam not available.' });
     }
 
-    // 2. Validate timing
+    console.log('Exam found:', {
+      title: exam.title,
+      duration: exam.duration,
+      scheduledAt: exam.scheduledAt,
+      endsAt: exam.endsAt
+    });
+
+    // 2. Validate timing - Check if within the exam window
     const now = new Date();
     const scheduledAt = new Date(exam.scheduledAt);
     const endsAt = new Date(exam.endsAt);
+
+    console.log('Timing check:', {
+      now: now.toISOString(),
+      scheduledAt: scheduledAt.toISOString(),
+      endsAt: endsAt.toISOString()
+    });
 
     if (now < scheduledAt) {
       return res.status(400).json({ message: 'Exam has not started yet.' });
     }
     if (now > endsAt) {
-      return res.status(400).json({ message: 'Exam has already ended.' });
+      return res.status(400).json({ message: 'Exam window has closed.' });
     }
 
-    // 3. Check if student already has a submission (resume or reject)
+    // 3. Check if student already has a submission
     let submission = await Submission.findOne({ exam: examId, student: studentId });
+
+    console.log('Submission check:', submission ? {
+      id: submission._id,
+      status: submission.status,
+      startTime: submission.startTime,
+      timeSpent: submission.timeSpent
+    } : 'No existing submission');
+
+    // Calculate exam duration in milliseconds
+    const examDurationMs = (exam.duration || 10) * 60 * 1000; // minutes → ms
+    console.log('Duration in ms:', examDurationMs);
 
     if (submission) {
       if (submission.status !== 'draft') {
         return res.status(400).json({ message: 'Exam already submitted.' });
       }
-      // Resume existing draft
+      
+      // Calculate time left based on startTime + duration
+      const examStartTime = new Date(submission.startTime);
+      const examEndTime = new Date(examStartTime.getTime() + examDurationMs);
+      let timeLeftMs = examEndTime - now;
+      
+      // Ensure timeLeft is not negative
+      timeLeftMs = Math.max(0, timeLeftMs);
+      
+      console.log('Resuming exam calculation:', {
+        examStartTime: examStartTime.toISOString(),
+        examEndTime: examEndTime.toISOString(),
+        now: now.toISOString(),
+        timeLeftMs,
+        timeLeftMinutes: Math.floor(timeLeftMs / 60000)
+      });
+      
+      // Get questions
+      const fullQuestions = await getExamQuestions(exam);
+      
+      return res.json({
+        submissionId: submission._id,
+        timeLeft: timeLeftMs, // in milliseconds
+        exam: {
+          _id: exam._id,
+          title: exam.title,
+          subject: exam.subject,
+          duration: exam.duration,
+          totalMarks: exam.totalMarks,
+          shuffleQuestions: exam.shuffleQuestions,
+          instructions: exam.instructions,
+          scheduledAt: exam.scheduledAt,
+          endsAt: exam.endsAt,
+          questions: fullQuestions
+        }
+      });
     } else {
       // Create new draft submission
       submission = new Submission({
@@ -587,26 +805,61 @@ const startExam = async (req, res) => {
         maxScore: exam.totalMarks || 100,
         status: 'draft',
         answers: [],
-        timeSpent: 0 // Will be updated on submit
+        timeSpent: 0
       });
       await submission.save();
+
+      // For new exam, time left is the full duration
+      const timeLeftMs = examDurationMs;
+
+      console.log('Starting new exam:', {
+        startTime: now.toISOString(),
+        duration: exam.duration,
+        timeLeftMs,
+        timeLeftMinutes: exam.duration
+      });
+
+      const fullQuestions = await getExamQuestions(exam);
+
+      res.json({
+        submissionId: submission._id,
+        timeLeft: timeLeftMs, // in milliseconds
+        exam: {
+          _id: exam._id,
+          title: exam.title,
+          subject: exam.subject,
+          duration: exam.duration,
+          totalMarks: exam.totalMarks,
+          shuffleQuestions: exam.shuffleQuestions,
+          instructions: exam.instructions,
+          scheduledAt: exam.scheduledAt,
+          endsAt: exam.endsAt,
+          questions: fullQuestions
+        }
+      });
     }
+  } catch (error) {
+    console.error('Start exam error:', error);
+    res.status(500).json({ 
+      message: 'Failed to start exam.',
+      error: error.message 
+    });
+  }
+};
 
-    // 4. Compute remaining time
-    const durationMs = (exam.duration || 10) * 60 * 1000; // minutes → ms
-    const elapsed = now - new Date(submission.startTime);
-    const timeLeft = Math.max(0, durationMs - elapsed);
-
-    // 5. Fetch full questions for frontend
+// Helper function to get exam questions (make sure this is defined)
+async function getExamQuestions(exam) {
+  try {
     const questionIds = exam.questions.map(q => q.question);
-    const fullQuestions = await Question.find({ _id: { $in: questionIds } }).select('text type options');
+    const fullQuestions = await Question.find({ _id: { $in: questionIds } })
+      .select('text type options diagrams imageUrl passage comprehensionQuestions points totalMarks');
 
     const questionMap = {};
     fullQuestions.forEach(q => {
       questionMap[q._id.toString()] = q;
     });
 
-    const populatedQuestions = exam.questions.map(eq => {
+    return exam.questions.map(eq => {
       const q = questionMap[eq.question.toString()];
       if (!q) {
         return {
@@ -617,37 +870,43 @@ const startExam = async (req, res) => {
           marks: eq.points
         };
       }
+      
+      if (q.type === 'comprehension') {
+        return {
+          _id: q._id,
+          type: 'comprehension',
+          text: q.text || '',
+          marks: eq.points || q.points || 1,
+          options: q.options || [],
+          diagrams: q.diagrams || [],
+          imageUrl: q.imageUrl,
+          title: q.passage?.title || '',
+          passage: q.passage?.content || q.text || '',
+          comprehensionQuestions: q.comprehensionQuestions || [],
+          questions: q.comprehensionQuestions || [],
+          totalMarks: q.totalMarks || 
+            (q.comprehensionQuestions?.reduce((sum, sq) => sum + (sq.marks || 1), 0) || eq.points || 1)
+        };
+      }
+      
       return {
         _id: q._id,
         type: q.type,
         text: q.text,
+        marks: eq.points || q.points || 1,
         options: q.options || [],
-        marks: eq.points
+        diagrams: q.diagrams || [],
+        imageUrl: q.imageUrl
       };
     });
-
-    // 6. Send response
-    res.json({
-      submissionId: submission._id,
-      timeLeft, // in milliseconds
-      exam: {
-        _id: exam._id,
-        title: exam.title,
-        subject: exam.subject,
-        duration: exam.duration,
-        totalMarks: exam.totalMarks,
-        shuffleQuestions: exam.shuffleQuestions,
-        instructions: exam.instructions,
-        scheduledAt: exam.scheduledAt,
-        endsAt: exam.endsAt,
-        questions: populatedQuestions
-      }
-    });
   } catch (error) {
-    console.error('Start exam error:', error);
-    res.status(500).json({ message: 'Failed to start exam.' });
+    console.error('Error getting exam questions:', error);
+    return [];
   }
-};
+}
+
+// Make sure to export the function
+ 
 module.exports = {
   getAllExams,
   createExam,

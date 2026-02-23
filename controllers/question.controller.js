@@ -6,12 +6,110 @@ const fs = require('fs');
 const path = require('path');
 // Add these methods
   
+// controllers/question.controller.js - Add/Update these methods
+
 const createQuestion = async (req, res) => {
   try {
     const questionData = { ...req.body, createdBy: req.user.id };
+    
+    // Handle comprehension passages specially
+    if (questionData.type === 'comprehension') {
+      // Ensure comprehensionQuestions have proper structure
+      if (questionData.comprehensionQuestions) {
+        questionData.comprehensionQuestions = questionData.comprehensionQuestions.map(q => ({
+          ...q,
+          _id: q._id || new mongoose.Types.ObjectId()
+        }));
+      }
+    }
+    
     const question = await Question.create(questionData);
-    res.status(201).json(question);
+    
+    // Populate for response
+    const populatedQuestion = await Question.findById(question._id)
+      .populate('subject', 'name code');
+      
+    res.status(201).json(populatedQuestion);
   } catch (error) {
+    console.error('Create question error:', error);
+    res.status(400).json({ message: error.message });
+  }
+};
+
+const getQuestionBank = async (req, res) => {
+  try {
+    const { subject } = req.query;
+    const filter = { createdBy: req.user.id };
+    
+    if (subject && mongoose.Types.ObjectId.isValid(subject)) {
+      filter.subject = new mongoose.Types.ObjectId(subject);
+    }
+
+    const questions = await Question.find(filter)
+      .populate('subject', 'name code')
+      .select('text type options points subject difficulty diagrams imageUrl passage comprehensionQuestions totalMarks')
+      .sort({ createdAt: -1 });
+
+    res.json(questions);
+  } catch (error) {
+    console.error('Get question bank error:', error);
+    res.status(500).json({ message: 'Failed to fetch question bank' });
+  }
+};
+
+const getQuestionById = async (req, res) => {
+  try {
+    const question = await Question.findById(req.params.id)
+      .populate('subject', 'name code');
+      
+    if (!question) {
+      return res.status(404).json({ message: 'Question not found.' });
+    }
+
+    // Check ownership or sharing
+    if (
+      question.createdBy.toString() !== req.user.id &&
+      !question.sharedWith.includes(req.user.id) &&
+      req.user.role !== 'admin'
+    ) {
+      return res.status(403).json({ message: 'Access denied.' });
+    }
+
+    res.json(question);
+  } catch (error) {
+    console.error('Get question error:', error);
+    res.status(500).json({ message: 'Failed to fetch question.' });
+  }
+};
+
+const updateQuestion = async (req, res) => {
+  try {
+    const question = await Question.findById(req.params.id);
+    if (!question) {
+      return res.status(404).json({ message: 'Question not found.' });
+    }
+
+    if (question.createdBy.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied.' });
+    }
+
+    // Handle comprehension questions
+    if (req.body.type === 'comprehension' && req.body.comprehensionQuestions) {
+      req.body.comprehensionQuestions = req.body.comprehensionQuestions.map(q => ({
+        ...q,
+        _id: q._id || new mongoose.Types.ObjectId()
+      }));
+    }
+
+    Object.assign(question, req.body);
+    await question.save();
+    
+    const updatedQuestion = await Question.findById(question._id)
+      .populate('subject', 'name code');
+      
+    res.json(updatedQuestion);
+  } catch (error) {
+    console.error('Update question error:', error);
     res.status(400).json({ message: error.message });
   }
 };
@@ -34,69 +132,7 @@ const getQuestionsByIds = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
-const getQuestionBank = async (req, res) => {
-  try {
-    const { subject } = req.query;
-    const filter = { createdBy: req.user.id };
-    
-    // ✅ Convert string subject ID to ObjectId
-    if (subject) {
-      // Validate if it's a valid ObjectId format
-      if (mongoose.Types.ObjectId.isValid(subject)) {
-        filter.subject = new mongoose.Types.ObjectId(subject);
-      } else {
-        return res.status(400).json({ message: 'Invalid subject ID format' });
-      }
-    }
-
-    const questions = await Question.find(filter)
-      .populate('subject', 'name')
-      .select('text type options points subject difficulty createdAt');
-
-    res.json(questions);
-  } catch (error) {
-    console.error('Get question bank error:', error);
-    res.status(500).json({ message: 'Failed to fetch question bank' });
-  }
-};
-
-const getQuestionById = async (req, res) => {
-  try {
-    const question = await Question.findById(req.params.id).populate('subject', 'name');
-    if (!question) return res.status(404).json({ message: 'Question not found.' });
-
-    // Check ownership or sharing
-    if (
-      question.createdBy.toString() !== req.user.id &&
-      !question.sharedWith.includes(req.user.id) &&
-      req.user.role !== 'admin'
-    ) {
-      return res.status(403).json({ message: 'Access denied.' });
-    }
-
-    res.json(question);
-  } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch question.' });
-  }
-};
-
-const updateQuestion = async (req, res) => {
-  try {
-    const question = await Question.findById(req.params.id);
-    if (!question) return res.status(404).json({ message: 'Question not found.' });
-
-    if (question.createdBy.toString() !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Access denied.' });
-    }
-
-    Object.assign(question, req.body);
-    await question.save();
-    res.json(question);
-  } catch (error) {
-    res.status(400).json({ message: error.message });
-  }
-};
-
+ 
 const deleteQuestion = async (req, res) => {
   try {
     const question = await Question.findById(req.params.id);

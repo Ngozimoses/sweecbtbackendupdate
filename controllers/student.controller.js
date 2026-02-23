@@ -202,7 +202,7 @@ const getUpcomingExams = async (req, res) => {
   }
 };
 
-// Get exam history for current student
+// In getMyExamHistory function, update the mapping part:
 const getMyExamHistory = async (req, res) => {
   try {
     const studentId = req.user.id;
@@ -218,13 +218,13 @@ const getMyExamHistory = async (req, res) => {
       status: 'published' 
     })
     .populate('subject', 'name')
- .select('title subject scheduledAt endsAt duration _id showResults') 
+    .select('title subject scheduledAt endsAt duration _id showResults') 
     .lean();
 
     const submissions = await Submission.find({ 
       student: studentId 
     })
-    .select('exam totalScore maxScore status createdAt')
+    .select('exam totalScore maxScore status createdAt answers')
     .lean();
 
     const submissionMap = {};
@@ -237,6 +237,32 @@ const getMyExamHistory = async (req, res) => {
       const submission = submissionMap[examId];
       const status = getExamStatus(exam, submission, now);
 
+      // Calculate score properly
+      let score = null;
+      let maxScore = 100;
+      let percentage = null;
+      
+      if (submission) {
+        // Use submission's maxScore if available
+        maxScore = submission.maxScore || 100;
+        
+        // If submission has totalScore, use it
+        if (submission.totalScore !== undefined && submission.totalScore !== null) {
+          score = submission.totalScore;
+        } 
+        // Otherwise calculate from answers if available
+        else if (submission.answers && submission.answers.length > 0) {
+          score = submission.answers.reduce((sum, ans) => {
+            return sum + (ans.awardedMarks || (ans.isCorrect ? 1 : 0));
+          }, 0);
+        }
+        
+        // Calculate percentage if we have both values
+        if (score !== null && maxScore > 0) {
+          percentage = Math.round((score / maxScore) * 100);
+        }
+      }
+
       return {
         _id: exam._id,
         title: exam.title,
@@ -244,11 +270,12 @@ const getMyExamHistory = async (req, res) => {
         startTime: exam.scheduledAt,
         endTime: exam.endsAt,
         duration: exam.duration,
-        score: submission?.totalScore,
-        maxScore: submission?.maxScore || 100,
+        score,
+        maxScore,
+        percentage,
         status,
         submittedAt: submission?.createdAt,
-         showResults: exam.showResults
+        showResults: exam.showResults
       };
     });
 
@@ -259,8 +286,6 @@ const getMyExamHistory = async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch exam history' });
   }
 };
-
-// Get exam history for any student (teacher view)
 const getExamHistory = async (req, res) => {
   try {
     if (req.user.role === 'student' && req.user._id.toString() !== req.params.id) {
@@ -294,25 +319,39 @@ const getExamHistory = async (req, res) => {
       submissionMap[sub.exam.toString()] = sub;
     });
 
-    const examHistory = allExams.map(exam => {
-      const examId = exam._id.toString();
-      const submission = submissionMap[examId];
-      const status = getExamStatus(exam, submission, now);
+// In getMyExamHistory function, update the mapping part:
+const examHistory = allExams.map(exam => {
+  const examId = exam._id.toString();
+  const submission = submissionMap[examId];
+  const status = getExamStatus(exam, submission, now);
 
-      return {
-        _id: exam._id,
-        title: exam.title,
-        subject: exam.subject,
-        startTime: exam.scheduledAt,
-        endTime: exam.endsAt,
-        duration: exam.duration,
-        score: submission?.totalScore,
-        maxScore: submission?.maxScore || 100,
-        status,
-        submittedAt: submission?.createdAt,
-        showResults: exam.showResults
-      };
-    });
+  // Calculate score if submission exists
+  let score = submission?.totalScore;
+  let maxScore = submission?.maxScore || 100;
+  
+  // If submission exists but totalScore is not set, calculate it from answers
+  if (submission && submission.answers && !submission.totalScore) {
+    // You might need to populate exam questions here to get points
+    score = submission.answers.reduce((sum, ans) => {
+      return sum + (ans.awardedMarks || (ans.isCorrect ? 1 : 0));
+    }, 0);
+  }
+
+  return {
+    _id: exam._id,
+    title: exam.title,
+    subject: exam.subject,
+    startTime: exam.scheduledAt,
+    endTime: exam.endsAt,
+    duration: exam.duration,
+    score,
+    maxScore,
+    percentage: maxScore > 0 && score !== undefined ? (score / maxScore) * 100 : null,
+    status,
+    submittedAt: submission?.createdAt,
+    showResults: exam.showResults
+  };
+});
 
     examHistory.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
     res.json(examHistory);
@@ -322,6 +361,7 @@ const getExamHistory = async (req, res) => {
   }
 };  
 
+// controllers/student.controller.js
 const getExamResult = async (req, res) => {
   try {
     const { studentId, examId } = req.params;
@@ -330,24 +370,144 @@ const getExamResult = async (req, res) => {
       return res.status(403).json({ message: 'Access denied' });
     }
 
+    // Find submission and populate all necessary data
     const submission = await Submission.findOne({ 
       student: studentId, 
       exam: examId 
     })
-    .populate('exam', 'title passingMarks')
-    .populate('answers.question', 'text');
+    .populate({
+      path: 'exam',
+      select: 'title subject passingMarks totalMarks questions showResults',
+      populate: {
+        path: 'questions.question',
+        select: 'text type points options correctAnswer'
+      }
+    })
+    .populate('answers.question', 'text type points');
 
     if (!submission) {
       return res.status(404).json({ message: 'Exam result not found' });
     }
 
-    res.json(submission);
+    // Check if results should be shown
+    if (submission.exam && submission.exam.showResults === false) {
+      return res.json({
+        _id: submission._id,
+        exam: {
+          _id: submission.exam._id,
+          title: submission.exam.title,
+          subject: submission.exam.subject,
+          showResults: false
+        },
+        status: submission.status,
+        submittedAt: submission.submittedAt || submission.createdAt,
+        message: 'Results are not yet published'
+      });
+    }
+
+    // Create a map of question IDs to their max points from the exam
+    const questionPointsMap = new Map();
+    if (submission.exam && submission.exam.questions) {
+      submission.exam.questions.forEach(q => {
+        const questionId = q.question?._id?.toString() || q.question?.toString();
+        if (questionId) {
+          questionPointsMap.set(questionId, q.points || 1);
+        }
+      });
+    }
+
+    // Process answers to ensure awardedMarks is set correctly
+    let totalCalculatedScore = 0;
+    const processedAnswers = submission.answers.map((ans, index) => {
+      const questionId = ans.question?._id?.toString() || ans.question?.toString();
+      const maxPoints = questionPointsMap.get(questionId) || 1;
+      
+      // Get the awarded marks - if not set, calculate from isCorrect
+      let awardedMarks = ans.awardedMarks;
+      
+      // If awardedMarks is 0 or undefined but answer is correct, set to max points
+      if ((awardedMarks === undefined || awardedMarks === 0) && ans.isCorrect === true) {
+        awardedMarks = maxPoints;
+      }
+      
+      // If still undefined, default to 0
+      if (awardedMarks === undefined) {
+        awardedMarks = 0;
+      }
+
+      // Add to total score
+      totalCalculatedScore += awardedMarks;
+
+      console.log(`Question ${index + 1}: awardedMarks=${awardedMarks}, isCorrect=${ans.isCorrect}, maxPoints=${maxPoints}`);
+
+      return {
+        ...ans.toObject(),
+        awardedMarks,
+        maxPoints,
+        question: ans.question ? {
+          ...ans.question.toObject(),
+          points: maxPoints
+        } : null
+      };
+    });
+
+    // Use the submission's maxScore or calculate from exam
+    const maxScore = submission.maxScore || 
+                    submission.exam?.totalMarks || 
+                    Array.from(questionPointsMap.values()).reduce((sum, points) => sum + points, 0);
+
+    // Use the submission's totalScore or our calculated total
+    const totalScore = submission.totalScore || totalCalculatedScore;
+
+    // Calculate percentage
+    const percentage = maxScore > 0 ? (totalScore / maxScore) * 100 : 0;
+
+    // Determine pass/fail
+    const passingPercentage = submission.exam?.passingMarks || 40;
+    const passed = percentage >= passingPercentage;
+
+    console.log('Final calculation:', {
+      totalScore,
+      maxScore,
+      percentage,
+      passed,
+      submissionTotalScore: submission.totalScore,
+      calculatedTotal: totalCalculatedScore
+    });
+
+    // Create the response object
+    const responseData = {
+      _id: submission._id,
+      exam: {
+        _id: submission.exam?._id,
+        title: submission.exam?.title || 'Exam',
+        subject: submission.exam?.subject || null,
+        passingMarks: submission.exam?.passingMarks,
+        totalMarks: maxScore,
+        showResults: submission.exam?.showResults
+      },
+      answers: processedAnswers,
+      totalScore,
+      maxScore,
+      percentage: Math.round(percentage * 100) / 100,
+      passed,
+      status: submission.status,
+      startedAt: submission.startTime,
+      submittedAt: submission.submittedAt || submission.createdAt,
+      gradedAt: submission.gradedAt,
+      feedback: submission.feedback,
+      timeSpent: submission.timeSpent,
+      createdAt: submission.createdAt,
+      updatedAt: submission.updatedAt
+    };
+
+    res.json(responseData);
+
   } catch (error) {
     console.error('Get exam result error:', error);
     res.status(500).json({ message: 'Failed to fetch exam result' });
   }
 };
-
 module.exports = {
   getUpcomingExams,
   getRecentResults,

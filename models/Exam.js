@@ -24,7 +24,7 @@ const ExamSchema = new mongoose.Schema({
     required: true
   },
   duration: {
-    type: Number, // in minutes
+    type: Number,
     required: [true, 'Duration (in minutes) is required'],
     min: [5, 'Duration must be at least 5 minutes'],
     max: [300, 'Duration cannot exceed 300 minutes']
@@ -33,39 +33,43 @@ const ExamSchema = new mongoose.Schema({
     type: Number,
     required: true
   },
-  passingMarks: { type: Number, default: 40 },      // ✅
-  totalMarks: { type: Number, default: 100 },        // ✅
-  shuffleQuestions: { type: Boolean, default: true }, // ✅
-  showResults: { type: Boolean, default: false },    
-questions: [{
-  question: {
-    type: mongoose.Schema.ObjectId,
-    ref: 'Question',
-    required: true
-  },
-  points: {
-    type: Number,
-    min: 0.5,
-    default: 1
-  }
-}],
+  passingMarks: { type: Number, default: 40 },
+  totalMarks: { type: Number, default: 100 },
+  shuffleQuestions: { type: Boolean, default: true },
+  showResults: { type: Boolean, default: false },
+  
+  // Updated questions array to handle both regular and comprehension
+  questions: [{
+    question: {
+      type: mongoose.Schema.ObjectId,
+      ref: 'Question',
+      required: true
+    },
+    points: {
+      type: Number,
+      min: 0.5,
+      default: 1
+    },
+    // NEW: For comprehension passages, store which sub-questions are included
+    includedSubQuestions: [{
+      type: mongoose.Schema.ObjectId
+    }]
+  }],
+  
   status: {
     type: String,
     enum: ['draft', 'scheduled', 'published', 'completed'],
     default: 'draft'
   },
- scheduledAt: { type: Date }, // Start date/time
-endsAt: { type: Date },      // End date/time
-instructions: {
-  type: String,
-  default: ''
-},
-// Add these new fields
-totalStudents: { type: Number, default: 0 },
-completed: { type: Number, default: 0 },
-  publishedAt: {
-    type: Date
-  }
+  scheduledAt: { type: Date },
+  endsAt: { type: Date },
+  instructions: {
+    type: String,
+    default: ''
+  },
+  totalStudents: { type: Number, default: 0 },
+  completed: { type: Number, default: 0 },
+  publishedAt: { type: Date }
 }, {
   timestamps: true
 });
@@ -75,8 +79,6 @@ ExamSchema.index({ subject: 1 });
 ExamSchema.index({ status: 1 });
 ExamSchema.index({ scheduledAt: 1 });
 ExamSchema.index({ endsAt: 1 });
-ExamSchema.index({ totalStudents: 1 });
-ExamSchema.index({ completed: 1 });
 ExamSchema.index({ createdBy: 1 });
 
 module.exports = mongoose.model('Exam', ExamSchema);

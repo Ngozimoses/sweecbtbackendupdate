@@ -1,55 +1,95 @@
-// middleware/auth.js
-const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const logger = require('../config/logger');
+const { verifyToken, extractTokenFromRequest } = require('../utils/jwt');
 
 /**
- * Middleware to protect routes: verifies JWT access token
+ * Middleware to protect routes: verifies JWT access token from cookies or header
  */
 const protect = async (req, res, next) => {
-  let token = req.headers.authorization;
-
-  if (!token || !token.startsWith('Bearer ')) {
-    return res.status(401).json({ message: 'Access denied. No token provided.' });
-  }
-
-  token = token.replace('Bearer ', '');
-
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    // Extract token from cookies or Authorization header
+    const token = extractTokenFromRequest(req);
+
+    if (!token) {
+      return res.status(401).json({ 
+        success: false,
+        message: 'Access denied. No token provided.' 
+      });
+    }
+
+    // Verify access token
+    const decoded = verifyToken(token, process.env.JWT_SECRET);
+    
+    if (!decoded) {
+      return res.status(401).json({ 
+        success: false,
+        message: 'Invalid or expired token.' 
+      });
+    }
+
+    // Get user from database
     const user = await User.findById(decoded.id).select('-password -refreshToken');
 
     if (!user) {
-      return res.status(401).json({ message: 'Invalid token: user not found.' });
+      return res.status(401).json({ 
+        success: false,
+        message: 'User not found.' 
+      });
     }
 
     req.user = user;
     next();
-  } catch (err) {
-    if (err.name === 'TokenExpiredError') {
-      return res.status(401).json({ message: 'Token expired.' });
+  } catch (error) {
+    logger.error('Auth middleware error:', error);
+    return res.status(401).json({ 
+      success: false,
+      message: 'Authentication failed.' 
+    });
+  }
+};
+
+/**
+ * Optional authentication - doesn't fail if no token
+ */
+const optionalAuth = async (req, res, next) => {
+  try {
+    const token = extractTokenFromRequest(req);
+    
+    if (token) {
+      const decoded = verifyToken(token, process.env.JWT_SECRET);
+      if (decoded) {
+        const user = await User.findById(decoded.id).select('-password -refreshToken');
+        req.user = user;
+      }
     }
-    logger.warn(`Authentication error: ${err.message}`);
-    return res.status(401).json({ message: 'Invalid token.' });
+    next();
+  } catch (error) {
+    // Just continue without user
+    next();
   }
 };
 
 /**
  * Middleware to restrict access by role
- * Usage: requireRole('admin', 'teacher')
  */
 const requireRole = (...allowedRoles) => {
   return (req, res, next) => {
     if (!req.user) {
-      return res.status(401).json({ message: 'Authentication required.' });
+      return res.status(401).json({ 
+        success: false,
+        message: 'Authentication required.' 
+      });
     }
 
     if (!allowedRoles.includes(req.user.role)) {
-      return res.status(403).json({ message: 'Access denied: insufficient permissions.' });
+      return res.status(403).json({ 
+        success: false,
+        message: 'Access denied: insufficient permissions.' 
+      });
     }
 
     next();
   };
 };
 
-module.exports = { protect, requireRole };
+module.exports = { protect, optionalAuth, requireRole };

@@ -7,15 +7,28 @@ const answerSchema = new mongoose.Schema({
     ref: 'Question',
     required: true
   },
+  // NEW: For comprehension sub-questions
+  subQuestionId: {
+    type: mongoose.Schema.ObjectId,
+    default: null
+  },
   answer: mongoose.Schema.Types.Mixed,
-  isCorrect: Boolean,
-  awardedMarks: { // ✅ Add this field
+  isCorrect: {
+    type: Boolean,
+    default: null
+  },
+  awardedMarks: {
     type: Number,
     default: 0
   },
   reviewed: {
     type: Boolean,
     default: false
+  },
+  // NEW: Store the actual answer text/choice for reference
+  answerText: {
+    type: String,
+    default: ''
   }
 });
 
@@ -34,7 +47,7 @@ const SubmissionSchema = new mongoose.Schema({
     type: Date,
     required: true
   },
-  answers: [answerSchema], // ✅ Now includes awardedMarks
+  answers: [answerSchema],
   timeSpent: {
     type: Number,
     required: true
@@ -67,16 +80,22 @@ const SubmissionSchema = new mongoose.Schema({
   reevaluationRequested: {
     type: Boolean,
     default: false
+  },
+  // NEW: Store metadata about the submission
+  metadata: {
+    ipAddress: String,
+    userAgent: String,
+    deviceInfo: String
   }
 }, {
   timestamps: true
 });
- 
 
 // Indexes
 SubmissionSchema.index({ exam: 1 });
 SubmissionSchema.index({ student: 1 });
 SubmissionSchema.index({ status: 1 });
 SubmissionSchema.index({ createdAt: 1 });
+SubmissionSchema.index({ 'exam': 1, 'student': 1 }, { unique: true });
 
 module.exports = mongoose.model('Submission', SubmissionSchema);
