@@ -29,7 +29,6 @@ const autoSave = async (req, res) => {
       return res.status(404).json({ message: 'Submission not found' });
     }
 
-<<<<<<< HEAD
     // Check authorization
     if (submission.student.toString() !== req.user.id) {
       return res.status(403).json({ message: 'Access denied' });
@@ -274,9 +273,6 @@ const requestReevaluation = async (req, res) => {
     }
 
     if (submission.student.toString() !== req.user.id) {
-=======
-    if (submission.student.toString() !== req.user?._id.toString()) {
->>>>>>> 64a66fbc9537bb0fdd595a1f0c1b5a1326ad6159
       return res.status(403).json({ message: 'Access denied' });
     }
 
