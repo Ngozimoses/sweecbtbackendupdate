@@ -8,7 +8,7 @@ const Subject = require('../models/Subject');
 // Get pending submissions for a teacher's exams
 const getPendingSubmissions = async (req, res) => {
   try {
-    const teacherId = req.params.teacherId;
+    const teacherId = req.user?._id.toString();
     
     // Find all exams created by this teacher
     const exams = await Exam.find({ 
@@ -38,7 +38,7 @@ const getPendingSubmissions = async (req, res) => {
 // Get all students taught by this teacher
 const getTeacherStudents = async (req, res) => {
   try {
-    const teacherId = req.params.teacherId;
+    const teacherId = req.user?._id.toString();
     
     // Find classes where this teacher is assigned
     const classes = await Class.find({ 
@@ -66,7 +66,7 @@ const getTeacherStudents = async (req, res) => {
 // Get class performance (subject-wise average scores)
 const getClassPerformance = async (req, res) => {
   try {
-    const teacherId = req.params.teacherId;
+    const teacherId = req.user?._id.toString();
     
     // Get teacher's classes
     const classes = await Class.find({ teacher: teacherId });

@@ -111,12 +111,12 @@ const deleteUser = async (req, res) => {
 const getCurrentUserClasses = async (req, res) => {
   try {
     if (req.user.role === 'student') {
-      const student = await User.findById(req.user.id).populate('class', 'name code');
+      const student = await User.findById(req.user?._id.toString()).populate('class', 'name code');
       return res.json(student.class ? [student.class] : []);
     }
 
     if (req.user.role === 'teacher') {
-      const classes = await Class.find({ teacher: req.user.id }).select('name code');
+      const classes = await Class.find({ teacher: req.user?._id.toString() }).select('name code');
       return res.json(classes);
     }
 

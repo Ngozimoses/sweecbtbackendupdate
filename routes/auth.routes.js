@@ -10,8 +10,9 @@ router.post('/register', validate(authValidator.registerSchema), authCtrl.regist
 router.post('/login', validate(authValidator.loginSchema), authCtrl.login);
 router.post('/refresh-token', authCtrl.refreshToken);
 router.post('/forgot-password', validate(authValidator.forgotPasswordSchema), authCtrl.forgotPassword);
+//ADDED VERIFY SESSION ENDPOINT
+router.post('/verify-session', authCtrl.verifySession);
 router.post('/reset-password/:token', validate(authValidator.resetPasswordSchema), authCtrl.resetPassword);
-
 // Protected routes
 router.get('/check', protect, authCtrl.checkAuth);
 router.get('/profile', protect, authCtrl.getProfile);

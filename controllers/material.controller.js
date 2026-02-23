@@ -65,7 +65,7 @@ const addMaterialToStore = async (req, res) => {
         type: type || 'link',
         subject,
         externalUrl,
-        uploadedBy: req.user.id,
+        uploadedBy: req.user?._id.toString(),
         uploadedByRole: req.user.role,
         class: null
       });
@@ -106,7 +106,7 @@ const addMaterialToStore = async (req, res) => {
         subject,
         fileUrl,
         fileSize,
-        uploadedBy: req.user.id,
+        uploadedBy: req.user?._id.toString(),
         uploadedByRole: req.user.role,
         class: null
       });
@@ -160,7 +160,7 @@ const removeMaterialFromStore = async (req, res) => {
 // Teacher: Get materials for their assigned classes
 const getTeacherClassMaterials = async (req, res) => {
   try {
-    const teacherId = req.user.id;
+    const teacherId = req.user?._id.toString();
     
     // Get classes assigned to this teacher
     const classes = await Class.find({ 
@@ -204,7 +204,7 @@ const addClassMaterial = async (req, res) => {
     // Verify teacher has access to this class
     const classDoc = await Class.findOne({ 
       _id: classId,
-      'teachers.teacher': req.user.id 
+      'teachers.teacher':req.user?._id.toString() 
     });
     
     if (!classDoc) {
@@ -224,7 +224,7 @@ const addClassMaterial = async (req, res) => {
         subject,
         class: classId,
         externalUrl,
-        uploadedBy: req.user.id,
+        uploadedBy: req.user?._id.toString(),
         uploadedByRole: req.user.role
       });
 
@@ -300,7 +300,7 @@ const removeClassMaterial = async (req, res) => {
     // Verify teacher has access to this class
     const classDoc = await Class.findOne({ 
       _id: material.class,
-      'teachers.teacher': req.user.id 
+      'teachers.teacher': req.user?._id.toString() 
     });
     
     if (!classDoc) {
@@ -327,7 +327,7 @@ const removeClassMaterial = async (req, res) => {
 // Student: Get materials for their class
 const getStudentClassMaterials = async (req, res) => {
   try {
-    const student = await User.findById(req.user.id).select('class');
+    const student = await User.findById(req.user?._id.toString()).select('class');
     
     if (!student.class) {
       return res.json([]);
@@ -368,14 +368,14 @@ const getMaterialById = async (req, res) => {
     // Check access permissions
     if (material.class) {
       if (req.user.role === 'student') {
-        const user = await User.findById(req.user.id).select('class');
+        const user = await User.findById(req.user?._id.toString()).select('class');
         if (user.class?.toString() !== material.class.toString()) {
           return res.status(403).json({ message: 'Access denied' });
         }
       } else if (req.user.role === 'teacher') {
         const classDoc = await Class.findOne({ 
           _id: material.class,
-          'teachers.teacher': req.user.id 
+          'teachers.teacher': req.user?._id.toString() 
         });
         if (!classDoc) {
           return res.status(403).json({ message: 'Access denied' });
@@ -407,14 +407,14 @@ const downloadMaterial = async (req, res) => {
     // Check access permissions
     if (material.class) {
       if (req.user.role === 'student') {
-        const user = await User.findById(req.user.id).select('class');
+        const user = await User.findById(req.user?._id.toString()).select('class');
         if (user.class?.toString() !== material.class.toString()) {
           return res.status(403).json({ message: 'Access denied' });
         }
       } else if (req.user.role === 'teacher') {
         const classDoc = await Class.findOne({ 
           _id: material.class,
-          'teachers.teacher': req.user.id 
+          'teachers.teacher': req.user?._id.toString()
         });
         if (!classDoc) {
           return res.status(403).json({ message: 'Access denied' });

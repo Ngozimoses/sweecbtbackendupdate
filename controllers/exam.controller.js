@@ -22,7 +22,7 @@ const getAllExams = async (req, res) => {
     if (teacher) {
       filter.createdBy = teacher;
     } else if (req.user.role === 'teacher') {
-      filter.createdBy = req.user.id;
+      filter.createdBy = req.user?._id.toString();;
     }
     
     if (classId) filter.class = classId;
@@ -107,6 +107,7 @@ const createExam = async (req, res) => {
     const questionRefs = [];
 
     for (const q of questions) {
+<<<<<<< HEAD
       let questionData;
       
       if (q.type === 'comprehension') {
@@ -151,6 +152,19 @@ const createExam = async (req, res) => {
           points: q.marks || 1
         };
       }
+=======
+      const options = q.type === 'short_answer' ? [] : q.options;
+
+      const question = new Question({
+        type: q.type,
+        text: q.text,
+        subject,
+        createdBy:req.user?._id.toString(),
+        difficulty: 'medium',
+        options,
+        points: q.marks
+      });
+>>>>>>> 64a66fbc9537bb0fdd595a1f0c1b5a1326ad6159
 
       const question = new Question(questionData);
       const savedQuestion = await question.save();
@@ -200,6 +214,157 @@ const createExam = async (req, res) => {
   }
 };
 
+<<<<<<< HEAD
+=======
+// In controllers/exam.controller.js - submitExam function
+
+const submitExam = async (req, res) => {
+  try {
+    const examId = req.params.id;
+    const studentId = req.user?._id.toString();
+    const { error, value } = require('../validators/exam.validator').submitExamSchema.validate(req.body);
+    if (error) {
+      return res.status(400).json({ message: error.details[0].message });
+    }
+    const { answers, timeSpent, warnings = [] } = value;
+
+    // 1. Validate exam exists and is published
+    const exam = await Exam.findById(examId).select('title duration questions status totalMarks');
+    if (!exam || exam.status !== 'published') {
+      return res.status(400).json({ message: 'Exam not available for submission' });
+    }
+
+    // 2. Validate exam has questions
+    if (!exam.questions || exam.questions.length === 0) {
+      return res.status(400).json({ message: 'Exam contains no questions' });
+    }
+
+    // 3. Find ONLY draft submission
+    let submission = await Submission.findOne({
+      exam: examId,
+      student: studentId,
+      status: 'draft'
+    });
+
+    // If no draft exists, reject (startExam should have created one)
+    if (!submission) {
+      return res.status(400).json({ message: 'No active exam session found. Please start the exam first.' });
+    }
+
+    // 4. Validate answers reference valid question IDs
+    const questionIds = exam.questions.map(q => q.question.toString());
+    const submittedQuestionIds = answers.map(a => a.question);
+
+    for (const id of submittedQuestionIds) {
+      if (!questionIds.includes(id)) {
+        return res.status(400).json({ message: `Invalid question ID: ${id}` });
+      }
+    }
+
+    // 5. Ensure all questions are represented (even unanswered)
+    const normalizedAnswers = exam.questions.map(examQ => {
+      const ans = answers.find(a => a.question === examQ.question.toString());
+      return {
+        question: examQ.question.toString(),
+        answer: ans?.answer || ''
+      };
+    });
+
+    // 6. Fetch full question data
+    const fullQuestionIds = exam.questions.map(q => q.question);
+    const fullQuestions = await Question.find({ _id: { $in: fullQuestionIds } });
+    const questionMap = {};
+    fullQuestions.forEach(q => {
+      questionMap[q._id.toString()] = q;
+    });
+
+    // 7. Score answers — NEVER auto-grade short_answer
+   // 7. Score answers
+let totalScore = 0;
+const maxScore = exam.totalMarks;
+
+const scoredAnswers = exam.questions.map(examQ => {
+  const ans = normalizedAnswers.find(a => a.question === examQ.question.toString());
+  const fullQuestion = questionMap[examQ.question.toString()];
+  const answerText = ans?.answer || '';
+
+  if (!fullQuestion) {
+    // Deleted question - no points, but doesn't block auto-grading
+    return {
+      question: examQ.question,
+      answer: answerText,
+      isCorrect: null,
+      reviewed: true // ← Mark as reviewed since it doesn't need grading
+    };
+  }
+
+  // Get actual points for this question
+  const questionPoints = examQ.points || 0;
+
+  // Handle MCQ / True-False
+  if (fullQuestion.type === 'multiple_choice' || fullQuestion.type === 'true_false') {
+    const correctOption = fullQuestion.options.find(opt => opt.isCorrect);
+    const isCorrect = correctOption && answerText === correctOption.text;
+    if (isCorrect) {
+      totalScore += questionPoints;
+    }
+    return {
+      question: examQ.question,
+      answer: answerText,
+      isCorrect,
+      reviewed: true
+    };
+  }
+
+  // Non-MCQ questions (short_answer, essay, etc.)
+  return {
+    question: examQ.question,
+    answer: answerText,
+    isCorrect: null,
+    reviewed: false
+  };
+});
+
+// 8. Determine final status - KEY CHANGE HERE
+const allQuestionsAreAutoGraded = exam.questions.every(examQ => {
+  const fullQuestion = questionMap[examQ.question.toString()];
+  if (!fullQuestion) return true; // Deleted questions don't prevent auto-grading
+  
+  return fullQuestion.type === 'multiple_choice' || fullQuestion.type === 'true_false';
+});
+
+const finalStatus = allQuestionsAreAutoGraded ? 'graded' : 'submitted';
+
+// 9. Update the draft submission
+submission.answers = scoredAnswers;
+submission.timeSpent = timeSpent;
+submission.warnings = warnings;
+submission.totalScore = totalScore;
+submission.maxScore = maxScore;
+submission.status = finalStatus;
+submission.submittedAt = new Date();
+
+await submission.save();
+
+    return res.status(201).json({
+      message: 'Exam submitted successfully',
+      submission: {
+        id: submission._id,
+        totalScore: submission.totalScore,
+        maxScore: submission.maxScore,
+        status: submission.status,
+        submittedAt: submission.submittedAt
+      }
+    });
+  } catch (error) {
+    console.error('Submission error:', error);
+    return res.status(500).json({
+      message: 'Internal server error during submission',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+>>>>>>> 64a66fbc9537bb0fdd595a1f0c1b5a1326ad6159
 const getExamById = async (req, res) => {
   try {
     const exam = await Exam.findById(req.params.id)
@@ -530,7 +695,7 @@ const scheduleExam = async (req, res) => {
 // ✅ FIXED: Removed invalid eligibleStudents field
 const getActiveExams = async (req, res) => {
   try {
-    const student = await User.findById(req.user.id).select('class');
+    const student = await User.findById(req.user?._id.toString()).select('class');
     if (!student.class) {
       return res.json([]);
     }
@@ -558,8 +723,13 @@ const getStudentExamResult = async (req, res) => {
 
     // Find the submission for this student and exam
     const submission = await Submission.findOne({
+<<<<<<< HEAD
       exam: examId,
       student: studentId
+=======
+      exam: req.params.id,
+      student: req.user?._id.toString()
+>>>>>>> 64a66fbc9537bb0fdd595a1f0c1b5a1326ad6159
     })
     .populate({
       path: 'exam',
@@ -677,7 +847,7 @@ const getExamSubmissions = async (req, res) => {
   try {
     const exam = await Exam.findOne({
       _id: req.params.id,
-      createdBy: req.user.id
+      createdBy: req.user?._id.toString()
     });
     if (!exam) {
       return res.status(403).json({ message: 'Access denied.' });
@@ -701,7 +871,7 @@ const getExamSubmissions = async (req, res) => {
 const startExam = async (req, res) => {
   try {
     const { id: examId } = req.params;
-    const studentId = req.user.id;
+    const studentId = req.user?._id.toString();
 
     console.log('=== START EXAM DEBUG ===');
     console.log('Exam ID:', examId);

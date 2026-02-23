@@ -10,6 +10,7 @@ const path = require('path');
 
 const createQuestion = async (req, res) => {
   try {
+<<<<<<< HEAD
     const questionData = { ...req.body, createdBy: req.user.id };
     
     // Handle comprehension passages specially
@@ -23,6 +24,9 @@ const createQuestion = async (req, res) => {
       }
     }
     
+=======
+    const questionData = { ...req.body, createdBy: req.user?._id.toString() };
+>>>>>>> 64a66fbc9537bb0fdd595a1f0c1b5a1326ad6159
     const question = await Question.create(questionData);
     
     // Populate for response
@@ -124,7 +128,7 @@ const getQuestionsByIds = async (req, res) => {
     const idArray = Array.isArray(ids) ? ids : ids.split(',');
     const questions = await Question.find({ 
       _id: { $in: idArray },
-      createdBy: req.user.id // Only allow teacher to access their own questions
+      createdBy: req.user?._id.toString() // Only allow teacher to access their own questions
     });
 
     res.json(questions);
@@ -132,7 +136,73 @@ const getQuestionsByIds = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+<<<<<<< HEAD
  
+=======
+const getQuestionBank = async (req, res) => {
+  try {
+    const { subject } = req.query;
+    const filter = { createdBy: req.user?._id.toString() };
+    
+    // ✅ Convert string subject ID to ObjectId
+    if (subject) {
+      // Validate if it's a valid ObjectId format
+      if (mongoose.Types.ObjectId.isValid(subject)) {
+        filter.subject = new mongoose.Types.ObjectId(subject);
+      } else {
+        return res.status(400).json({ message: 'Invalid subject ID format' });
+      }
+    }
+
+    const questions = await Question.find(filter)
+      .populate('subject', 'name')
+      .select('text type options points subject difficulty createdAt');
+
+    res.json(questions);
+  } catch (error) {
+    console.error('Get question bank error:', error);
+    res.status(500).json({ message: 'Failed to fetch question bank' });
+  }
+};
+
+const getQuestionById = async (req, res) => {
+  try {
+    const question = await Question.findById(req.params.id).populate('subject', 'name');
+    if (!question) return res.status(404).json({ message: 'Question not found.' });
+
+    // Check ownership or sharing
+    if (
+      question.createdBy.toString() !== req.user?._id.toString() &&
+      !question.sharedWith.includes(req.user?._id.toString()) &&
+      req.user.role !== 'admin'
+    ) {
+      return res.status(403).json({ message: 'Access denied.' });
+    }
+
+    res.json(question);
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch question.' });
+  }
+};
+
+const updateQuestion = async (req, res) => {
+  try {
+    const question = await Question.findById(req.params.id);
+    if (!question) return res.status(404).json({ message: 'Question not found.' });
+
+    if (question.createdBy.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied.' });
+    }
+
+    Object.assign(question, req.body);
+    await question.save();
+    res.json(question);
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+>>>>>>> 64a66fbc9537bb0fdd595a1f0c1b5a1326ad6159
 const deleteQuestion = async (req, res) => {
   try {
     const question = await Question.findById(req.params.id);
@@ -141,7 +211,7 @@ const deleteQuestion = async (req, res) => {
     }
 
     // Security check
-    if (req.user.role === 'teacher' && question.createdBy.toString() !== req.user.id) {
+    if (req.user.role === 'teacher' && question.createdBy.toString() !== req.user?._id.toString()) {
       return res.status(403).json({ message: 'Access denied' });
     }
 
@@ -177,7 +247,7 @@ const getTeacherQuestions = async (req, res) => {
     const { teacherId } = req.params;
     
     // Security: Teachers can only access their own questions
-    if (req.user.role === 'teacher' && req.user.id !== teacherId) {
+    if (req.user.role === 'teacher' && req.user?._id.toString() !== teacherId) {
       return res.status(403).json({ message: 'Access denied' });
     }
 
@@ -203,8 +273,8 @@ const getTeacherSubjects = async (req, res) => {
       // Get classes taught by teacher
       const classes = await Class.find({ 
         $or: [
-          { teacher: req.user.id },
-          { 'subjects.teacher': req.user.id }
+          { teacher: req.user?._id.toString() },
+          { 'subjects.teacher': req.user?._id.toString() }
         ]
       }).distinct('subjects.subject');
       
