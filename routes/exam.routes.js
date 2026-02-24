@@ -14,13 +14,13 @@ router.get('/active', requireRole('student'), examCtrl.getActiveExams);
 
 // General exam management (Teacher/Admin)
 router.route('/')
-  .get(requireRole('admin', 'teacher'), examCtrl.getAllExams)
-  .post(requireRole('admin', 'teacher'), validate(examValidator.createExamSchema), examCtrl.createExam); // ✅ Fixed: teachers can now create exams
+    .post(requireRole( 'teacher'), validate(examValidator.createExamSchema), examCtrl.createExam) 
+  .get(requireRole('admin', 'teacher'), examCtrl.getAllExams);
 
 // Single exam routes
 router.route('/:id')
   .get(requireRole('student', 'teacher', 'admin'), examCtrl.getExamById)
-  .patch(requireRole('admin'), validate(examValidator.updateExamSchema), examCtrl.updateExam)
+  .patch(requireRole( 'teacher','admin'), validate(examValidator.updateExamSchema), examCtrl.updateExam)
   .delete(requireRole('admin'), examCtrl.deleteExam);
 
 // Exam submission
