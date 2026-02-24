@@ -261,9 +261,34 @@ app.get('/api/docs', (req, res) => {
   });
 });
 
+ // ========================
+// DEBUG ENDPOINTS (helpful for troubleshooting)
 // ========================
-// 404 HANDLER
-// ========================
+app.get('/api/debug/cookies', (req, res) => {
+  console.log('🔍 Debug cookies endpoint called');
+  console.log('🍪 Cookies:', req.cookies);
+  console.log('📋 Cookie header:', req.headers.cookie);
+  
+  res.json({
+    success: true,
+    message: 'Debug cookies',
+    cookies: req.cookies,
+    cookieHeader: req.headers.cookie,
+    hasAccessToken: !!req.cookies?.accessToken,
+    hasRefreshToken: !!req.cookies?.refreshToken,
+    environment: process.env.NODE_ENV,
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/api/debug/headers', (req, res) => {
+  console.log('🔍 Debug headers endpoint called');
+  res.json({
+    success: true,
+    headers: req.headers,
+    cookies: req.cookies
+  });
+});
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -275,9 +300,7 @@ app.use((req, res) => {
   });
 });
 
-// ========================
-// GLOBAL ERROR HANDLER
-// ========================
+ 
 app.use(errorHandler);
 
 // ========================
