@@ -105,6 +105,9 @@ app.use((req, res, next) => {
 // ========================
 // CORS CONFIGURATION - iOS SAFARI FIX
 // ========================
+// ========================
+// CORS CONFIGURATION - iOS SAFARI FIX
+// ========================
 const allowedOrigins = [
   process.env.CLIENT_URL,
   'http://localhost:5173',
@@ -114,18 +117,21 @@ const allowedOrigins = [
   'https://sweecbtbackendupdate.onrender.com'
 ].filter(Boolean);
 
-// Handle preflight requests with proper headers for Safari
-app.options('*', (req, res) => {
-  const origin = req.headers.origin;
-  if (origin && allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Cookie');
-    res.setHeader('Access-Control-Expose-Headers', 'Set-Cookie');
-    res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
+// Handle preflight requests - FIXED: Use middleware instead of wildcard route
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    const origin = req.headers.origin;
+    if (origin && allowedOrigins.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Cookie');
+      res.setHeader('Access-Control-Expose-Headers', 'Set-Cookie');
+      res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
+      return res.sendStatus(200);
+    }
   }
-  res.sendStatus(200);
+  next();
 });
 
 app.use(cors({
@@ -143,10 +149,7 @@ app.use(cors({
   exposedHeaders: ['Authorization', 'Refresh-Token', 'Set-Cookie'],
   optionsSuccessStatus: 200
 }));
-
-// ========================
-// LOGGING MIDDLEWARE
-// ========================
+ 
 if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
 } else {
