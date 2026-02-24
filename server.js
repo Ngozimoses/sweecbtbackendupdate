@@ -6,7 +6,24 @@ const morgan = require('morgan');
 const path = require('path');
 const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
+
+// Import routes
+const authRoutes = require('./routes/auth.routes');
+const userRoutes = require('./routes/user.routes');
+const classRoutes = require('./routes/class.routes');
+const subjectRoutes = require('./routes/subject.routes');
+const examRoutes = require('./routes/exam.routes');
 const questionRoutes = require('./routes/question.routes');
+const resultRoutes = require('./routes/result.routes');
+const reportRoutes = require('./routes/report.routes');
+const notificationRoutes = require('./routes/notification.routes');
+const uploadRoutes = require('./routes/upload.routes');
+const studentRoutes = require('./routes/student.routes');
+const submissionRoutes = require('./routes/submission.routes');
+const teacherRoutes = require('./routes/teacher.routes');
+const adminRoutes = require('./routes/admin.routes');
+const materialRoutes = require('./routes/material.routes');
+
 // Load environment variables
 dotenv.config({ path: path.resolve(__dirname, '.env') });
 
@@ -40,9 +57,6 @@ const logger = require('./config/logger');
 
 // Import middleware
 const { errorHandler } = require('./middleware/error');
-const teacherRoutes = require('./routes/teacher.routes');
-const adminRoutes = require('./routes/admin.routes');
-const materialRoutes = require('./routes/material.routes');
 
 // Connect to MongoDB
 connectDB();
@@ -184,22 +198,21 @@ if (process.env.NODE_ENV === 'development') {
 // ========================
 // API ROUTES
 // ========================
-app.use('/api/auth', require('./routes/auth.routes'));
-app.use('/api/users', require('./routes/user.routes'));
-app.use('/api/classes', require('./routes/class.routes'));
-app.use('/api/subjects', require('./routes/subject.routes'));
-app.use('/api/exams', require('./routes/exam.routes'));
-app.use('/api/questions', require('./routes/question.routes'));
-app.use('/api/results', require('./routes/result.routes'));
-app.use('/api/reports', require('./routes/report.routes'));
-app.use('/api/notifications', require('./routes/notification.routes'));
-app.use('/api/upload', require('./routes/upload.routes'));
+app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/classes', classRoutes);
+app.use('/api/subjects', subjectRoutes);
+app.use('/api/exams', examRoutes);
+app.use('/api/questions', questionRoutes);  // ✅ Question routes mounted here
+app.use('/api/results', resultRoutes);
+app.use('/api/reports', reportRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/upload', uploadRoutes);
 app.use('/api/admin', adminRoutes);
-app.use('/api/students', require('./routes/student.routes'));
+app.use('/api/students', studentRoutes);
 app.use('/api/materials', materialRoutes);
-app.use('/api/submissions', require('./routes/submission.routes'));
+app.use('/api/submissions', submissionRoutes);
 app.use('/api/teachers', teacherRoutes);
-app.use('/api/questions', questionRoutes);
 
 // ========================
 // STATIC FILES
@@ -286,6 +299,8 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   logger.info(`   - GET    /api/auth/verify-session`);
   logger.info(`   - GET    /health (rate limit bypass)`);
   logger.info(`   - GET    /api/health (rate limit bypass)`);
+  logger.info(`   - GET    /api/questions (question bank)`);
+  logger.info(`   - POST   /api/questions/bank (create question)`);
 });
 
 // ========================
