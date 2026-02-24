@@ -34,18 +34,18 @@ const generateRefreshToken = (userId) => {
 const setTokenCookies = (res, accessToken, refreshToken) => {
   const isProduction = process.env.NODE_ENV === 'production';
   console.log('🍪 Setting cookies. Production:', isProduction);
-  console.log('🍪 Cookie domain:', isProduction ? process.env.COOKIE_DOMAIN : 'undefined');
-  console.log('🍪 SameSite:', isProduction ? 'none' : 'lax');
+  console.log('🍪 SameSite:', 'none');
   console.log('🍪 Secure:', true);
+  console.log('🍪 Domain: not set (browser will handle automatically)');
   
-  // For cross-site requests (frontend and backend on different domains),
-  // we need SameSite=None and Secure=true in production
+  // CRITICAL FIX: Don't set domain for cross-site cookies
+  // Let the browser handle domain automatically
   const cookieOptions = {
     httpOnly: true,
     secure: true, // Must be true when SameSite=None
-    sameSite: 'none', // Changed from 'lax' to 'none' for cross-site
-    domain: isProduction ? process.env.COOKIE_DOMAIN : undefined,
-    path: '/'
+    sameSite: 'none', // Required for cross-site
+    path: '/',
+    // Domain is intentionally omitted - browser handles it automatically
   };
 
   // Access token cookie (15 minutes)
@@ -74,8 +74,8 @@ const clearTokenCookies = (res) => {
     httpOnly: true,
     secure: true,
     sameSite: 'none',
-    domain: isProduction ? process.env.COOKIE_DOMAIN : undefined,
-    path: '/'
+    path: '/',
+    // Domain intentionally omitted
   };
 
   res.clearCookie('accessToken', cookieOptions);
