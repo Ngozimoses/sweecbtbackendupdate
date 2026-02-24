@@ -47,7 +47,9 @@ const materialRoutes = require('./routes/material.routes');
 // Connect to MongoDB
 connectDB();
 
- 
+// ========================
+// SECURITY MIDDLEWARE
+// ========================
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -62,6 +64,28 @@ app.use(helmet({
 }));
 
 // ========================
+// TRUST PROXY (important for Render and iOS)
+// ========================
+app.set('trust proxy', 1);
+
+// ========================
+// iOS-Specific Headers Middleware
+// ========================
+app.use((req, res, next) => {
+  // Essential headers for iOS Safari
+  res.setHeader('Access-Control-Allow-Private-Network', 'true');
+  
+  // Prevent caching of authenticated requests (important for iOS)
+  if (req.path.startsWith('/api/')) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+  
+  next();
+});
+
+// ========================
 // CORS CONFIGURATION
 // ========================
 const allowedOrigins = [
@@ -72,7 +96,7 @@ const allowedOrigins = [
   'https://sweecbt.vercel.app',  // Your frontend domain
   'https://sweecbtbackend.onrender.com'
 ].filter(Boolean);
-app.set('trust proxy', 1); 
+
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps, curl, Postman)
@@ -85,7 +109,7 @@ app.use(cors({
     return callback(null, true);
   },
   credentials: true,
-  exposedHeaders: ['Authorization', 'Refresh-Token'],
+  exposedHeaders: ['Authorization', 'Refresh-Token', 'Set-Cookie'],
   optionsSuccessStatus: 200
 }));
 
@@ -146,12 +170,13 @@ app.get('/health', (req, res) => {
 });
 
 // ========================
-// DEVELOPMENT DEBUGGING
+// iOS Cookie Debugging (only in development)
 // ========================
 if (process.env.NODE_ENV === 'development') {
   app.use((req, res, next) => {
     console.log('🍪 Cookies:', req.cookies);
     console.log('📋 Headers:', req.headers);
+    console.log('📱 User-Agent:', req.headers['user-agent']);
     next();
   });
 }
@@ -248,6 +273,7 @@ const PORT = process.env.PORT || 10000;
 const server = app.listen(PORT, '0.0.0.0', () => {
   logger.info(`🚀 Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
   logger.info(`🌐 Frontend origin: ${process.env.CLIENT_URL}`);
+  logger.info(`📱 iOS/Safari compatibility enabled`);
   logger.info(`📝 Available routes:`);
   logger.info(`   - POST   /api/auth/login`);
   logger.info(`   - POST   /api/auth/register`);
