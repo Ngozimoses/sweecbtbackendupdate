@@ -29,23 +29,26 @@ const generateRefreshToken = (userId) => {
 };
 
 /**
- * Set token cookies in response
+ * Set token cookies in response with iOS/Safari compatibility
  */
 const setTokenCookies = (res, accessToken, refreshToken) => {
   const isProduction = process.env.NODE_ENV === 'production';
   console.log('🍪 Setting cookies. Production:', isProduction);
   console.log('🍪 SameSite:', 'none');
   console.log('🍪 Secure:', true);
-  console.log('🍪 Domain: not set (browser will handle automatically)');
+  console.log('🍪 Domain:', isProduction ? '.onrender.com' : 'not set');
+  console.log('🍪 Partitioned:', true); // Helps with Safari ITP
   
-  // CRITICAL FIX: Don't set domain for cross-site cookies
-  // Let the browser handle domain automatically
+  // iOS/Safari requires additional attributes
   const cookieOptions = {
     httpOnly: true,
-    secure: true, // Must be true when SameSite=None
-    sameSite: 'none', // Required for cross-site
+    secure: true,
+    sameSite: 'none',
     path: '/',
-    // Domain is intentionally omitted - browser handles it automatically
+    // CRITICAL FOR SAFARI: Set domain explicitly for cross-site
+    domain: isProduction ? '.onrender.com' : undefined,
+    // Add partitioned flag for Safari ITP
+    partitioned: true,
   };
 
   // Access token cookie (15 minutes)
@@ -61,6 +64,7 @@ const setTokenCookies = (res, accessToken, refreshToken) => {
     maxAge: 7 * 24 * 60 * 60 * 1000
   });
   console.log('✅ Refresh token cookie set, expires in 7 days');
+  console.log('✅ iOS/Safari compatibility enabled with partitioned flag');
 };
 
 /**
@@ -75,7 +79,8 @@ const clearTokenCookies = (res) => {
     secure: true,
     sameSite: 'none',
     path: '/',
-    // Domain intentionally omitted
+    domain: isProduction ? '.onrender.com' : undefined,
+    partitioned: true,
   };
 
   res.clearCookie('accessToken', cookieOptions);
