@@ -96,43 +96,20 @@ app.use((req, res, next) => {
     res.setHeader('Expires', '0');
   }
   
-  // Add Vary header for proper caching
-  res.setHeader('Vary', 'Origin, Cookie');
-  
   next();
 });
 
 // ========================
-// CORS CONFIGURATION - iOS SAFARI FIX
-// ========================
-// ========================
-// CORS CONFIGURATION - iOS SAFARI FIX
+// CORS CONFIGURATION
 // ========================
 const allowedOrigins = [
   process.env.CLIENT_URL,
   'http://localhost:5173',
   'http://localhost:3000',
   'http://localhost:3001',
-  'https://sweecbt.vercel.app',
-  'https://sweecbtbackendupdate.onrender.com'
+  'https://sweecbt.vercel.app',  // Your frontend domain
+  'https://sweecbtbackend.onrender.com'
 ].filter(Boolean);
-
-// Handle preflight requests - FIXED: Use middleware instead of wildcard route
-app.use((req, res, next) => {
-  if (req.method === 'OPTIONS') {
-    const origin = req.headers.origin;
-    if (origin && allowedOrigins.includes(origin)) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Cookie');
-      res.setHeader('Access-Control-Expose-Headers', 'Set-Cookie');
-      res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
-      return res.sendStatus(200);
-    }
-  }
-  next();
-});
 
 app.use(cors({
   origin: function (origin, callback) {
@@ -149,7 +126,10 @@ app.use(cors({
   exposedHeaders: ['Authorization', 'Refresh-Token', 'Set-Cookie'],
   optionsSuccessStatus: 200
 }));
- 
+
+// ========================
+// LOGGING MIDDLEWARE
+// ========================
 if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
 } else {
@@ -223,7 +203,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/classes', classRoutes);
 app.use('/api/subjects', subjectRoutes);
 app.use('/api/exams', examRoutes);
-app.use('/api/questions', questionRoutes);
+app.use('/api/questions', questionRoutes);  // ✅ Question routes mounted here
 app.use('/api/results', resultRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/notifications', notificationRoutes);
@@ -281,7 +261,7 @@ app.get('/api/docs', (req, res) => {
   });
 });
 
-// ========================
+ // ========================
 // DEBUG ENDPOINTS (helpful for troubleshooting)
 // ========================
 app.get('/api/debug/cookies', (req, res) => {
@@ -309,10 +289,6 @@ app.get('/api/debug/headers', (req, res) => {
     cookies: req.cookies
   });
 });
-
-// ========================
-// 404 HANDLER
-// ========================
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -324,9 +300,7 @@ app.use((req, res) => {
   });
 });
 
-// ========================
-// GLOBAL ERROR HANDLER
-// ========================
+ 
 app.use(errorHandler);
 
 // ========================
@@ -337,7 +311,6 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   logger.info(`🚀 Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
   logger.info(`🌐 Frontend origin: ${process.env.CLIENT_URL}`);
   logger.info(`📱 iOS/Safari compatibility enabled`);
-  logger.info(`🍪 Cookie settings: SameSite=None, Secure=true, Partitioned=true`);
   logger.info(`📝 Available routes:`);
   logger.info(`   - POST   /api/auth/login`);
   logger.info(`   - POST   /api/auth/register`);
@@ -349,8 +322,8 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   logger.info(`   - GET    /api/auth/verify-session`);
   logger.info(`   - GET    /health (rate limit bypass)`);
   logger.info(`   - GET    /api/health (rate limit bypass)`);
-  logger.info(`   - GET    /api/debug/cookies (debug)`);
-  logger.info(`   - GET    /api/debug/headers (debug)`);
+  logger.info(`   - GET    /api/questions (question bank)`);
+  logger.info(`   - POST   /api/questions/bank (create question)`);
 });
 
 // ========================
@@ -373,5 +346,4 @@ process.on('SIGTERM', () => {
     process.exit(0);
   });
 });
-
 module.exports = app;
