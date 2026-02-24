@@ -6,7 +6,7 @@ const morgan = require('morgan');
 const path = require('path');
 const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
-
+const questionRoutes = require('./routes/question.routes');
 // Load environment variables
 dotenv.config({ path: path.resolve(__dirname, '.env') });
 
@@ -199,6 +199,7 @@ app.use('/api/students', require('./routes/student.routes'));
 app.use('/api/materials', materialRoutes);
 app.use('/api/submissions', require('./routes/submission.routes'));
 app.use('/api/teachers', teacherRoutes);
+app.use('/api/questions', questionRoutes);
 
 // ========================
 // STATIC FILES
