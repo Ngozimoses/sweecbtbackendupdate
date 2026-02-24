@@ -1,8 +1,9 @@
-# render.yaml
 services:
   - type: web
-    name: sweecbt-backend
-    env: node
+    name: sweecbt-backendproject
+    runtime: node
+    region: oregon  # or choose the closest to your users
+    plan: free  # or starter, professional etc.
     buildCommand: npm install
     startCommand: npm start
     envVars:
@@ -10,3 +11,17 @@ services:
         value: production
       - key: PORT
         value: 10000
+      - key: MONGODB_URI
+        sync: false  # This means you'll set it manually in Render dashboard
+      - key: JWT_SECRET
+        sync: false
+      - key: REFRESH_TOKEN_SECRET
+        sync: false
+      - key: CLIENT_URL
+        value: https://sweecbt.vercel.app
+      - key: COOKIE_SAMESITE
+        value: none
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: COOKIE_DOMAIN
+        value: .onrender.com

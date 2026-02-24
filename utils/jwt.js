@@ -28,10 +28,12 @@ const generateRefreshToken = (userId) => {
 const setTokenCookies = (res, accessToken, refreshToken) => {
   const isProduction = process.env.NODE_ENV === 'production';
   
+  // For cross-site requests (frontend and backend on different domains),
+  // we need SameSite=None and Secure=true in production
   const cookieOptions = {
     httpOnly: true,
-    secure: isProduction,
-    sameSite: process.env.COOKIE_SAMESITE || 'lax',
+    secure: true, // Must be true when SameSite=None
+    sameSite: 'none', // Changed from 'lax' to 'none' for cross-site
     domain: isProduction ? process.env.COOKIE_DOMAIN : undefined,
     path: '/'
   };
@@ -57,8 +59,8 @@ const clearTokenCookies = (res) => {
   
   const cookieOptions = {
     httpOnly: true,
-    secure: isProduction,
-    sameSite: process.env.COOKIE_SAMESITE || 'lax',
+    secure: true,
+    sameSite: 'none',
     domain: isProduction ? process.env.COOKIE_DOMAIN : undefined,
     path: '/'
   };
