@@ -9,8 +9,9 @@ const questionCtrl = require('../controllers/question.controller');
 // All routes are protected
 router.use(protect);
 
-// Question bank - filtered by subject
+// Question bank operations
 router.get('/bank', requireRole('teacher', 'admin'), questionCtrl.getQuestionBank);
+router.post('/bank', requireRole('teacher', 'admin'), validate(questionValidator.createQuestionSchema), questionCtrl.createQuestion); // 👈 ADD THIS
 
 // Get questions by IDs
 router.get('/bank/ids', requireRole('student', 'admin', 'teacher'), questionCtrl.getQuestionsByIds);
