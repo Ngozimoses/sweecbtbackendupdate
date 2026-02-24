@@ -13,10 +13,10 @@ router.use(protect);
 router.get('/active', requireRole('student'), examCtrl.getActiveExams);
 
 // General exam management (Teacher/Admin)
+ 
 router.route('/')
   .get(requireRole('admin', 'teacher'), examCtrl.getAllExams)
-  .post(requireRole('admin'), validate(examValidator.createExamSchema), examCtrl.createExam);
-
+  .post(requireRole('admin', 'teacher'), validate(examValidator.createExamSchema), examCtrl.createExam); 
 // Single exam routes
 router.route('/:id')
   .get(requireRole('student', 'teacher', 'admin'), examCtrl.getExamById)
