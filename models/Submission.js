@@ -90,7 +90,7 @@ const SubmissionSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Pre-save hook to validate and correct maxScore
+ // Pre-save hook to validate and correct maxScore
 SubmissionSchema.pre('save', async function(next) {
   try {
     // Only run this check if we have answers and we're not in the middle of grading
@@ -129,14 +129,14 @@ SubmissionSchema.pre('save', async function(next) {
         }
       }
     }
-    next();
+    next(); // Call next() at the end
   } catch (error) {
     console.error('Error in Submission pre-save hook:', error);
-    next(); // Continue even if error occurs
+    next(error); // Pass error to next()
   }
 });
 
-// Post-find middleware to ensure correct maxScore when retrieving
+// Post-init hook (this one doesn't need next)
 SubmissionSchema.post('init', function(doc) {
   // If this is a new document or being fetched
   if (doc.answers && doc.answers.length > 0) {
@@ -147,7 +147,8 @@ SubmissionSchema.post('init', function(doc) {
     }
   }
 });
-
+// Post-find middleware to ensure correct maxScore when retrieving
+ 
 // Virtual for percentage that uses correct calculation
 SubmissionSchema.virtual('correctPercentage').get(function() {
   const maxScoreToUse = (this.maxScore === 100 && this.answers?.length <= 30) 
