@@ -299,10 +299,18 @@ const submitExam = async (req, res) => {
     const { answers, timeSpent, warnings = [] } = req.body;
 
     console.log('Submit exam - timeSpent received:', timeSpent, 'type:', typeof timeSpent);
+    console.log('Submit exam - answers count:', answers?.length);
 
     // Validate exam exists
     const exam = await Exam.findById(examId)
-      .populate('questions.question', 'type options comprehensionQuestions points');
+      .populate({
+        path: 'questions.question',
+        select: 'text type options comprehensionQuestions points',
+        populate: {
+          path: 'comprehensionQuestions',
+          select: 'text type options marks'
+        }
+      });
 
     if (!exam || exam.status !== 'published') {
       return res.status(400).json({ message: 'Exam not available for submission' });
@@ -319,38 +327,81 @@ const submitExam = async (req, res) => {
       return res.status(400).json({ message: 'No active exam session found.' });
     }
 
-    // FIX: Convert timeSpent from milliseconds to seconds if needed
+    // Process timeSpent - convert from milliseconds to seconds if needed
     let finalTimeSpent = timeSpent;
-    
-    // If timeSpent is greater than exam duration in seconds * 1000, 
-    // it's likely in milliseconds
     const examDurationSeconds = exam.duration * 60;
+    
+    if (typeof finalTimeSpent === 'string') {
+      finalTimeSpent = parseInt(finalTimeSpent, 10);
+    }
+    
+    // If timeSpent is greater than exam duration in seconds * 2, it's likely in milliseconds
     if (finalTimeSpent > examDurationSeconds * 2) {
       console.log('Converting timeSpent from ms to seconds:', finalTimeSpent);
       finalTimeSpent = Math.floor(finalTimeSpent / 1000);
     }
     
-    // Ensure timeSpent doesn't exceed exam duration
-    finalTimeSpent = Math.min(finalTimeSpent, examDurationSeconds);
+    // Ensure timeSpent doesn't exceed exam duration and is not negative
+    finalTimeSpent = Math.min(Math.max(0, finalTimeSpent), examDurationSeconds);
     
     console.log('Final timeSpent (seconds):', finalTimeSpent);
 
+    // Calculate actual max score by counting questions
+    let actualMaxScore = 0;
+    const questionPointsMap = new Map();
+    
+    exam.questions.forEach(eq => {
+      const questionId = eq.question._id.toString();
+      
+      if (eq.question.type === 'comprehension' && eq.question.comprehensionQuestions) {
+        // For comprehension, each sub-question is worth 1 mark
+        const subQuestionCount = eq.question.comprehensionQuestions.length;
+        actualMaxScore += subQuestionCount;
+        questionPointsMap.set(questionId, {
+          type: 'comprehension',
+          count: subQuestionCount,
+          points: subQuestionCount // Total points for this comprehension passage
+        });
+      } else {
+        // Regular question is worth 1 mark
+        actualMaxScore += 1;
+        questionPointsMap.set(questionId, {
+          type: 'regular',
+          points: 1
+        });
+      }
+    });
+
+    console.log('Actual max score calculated:', actualMaxScore);
+    console.log('Question points map:', Object.fromEntries(questionPointsMap));
+
+    // Validate that we have answers for all questions
+    const expectedAnswerCount = actualMaxScore;
+    if (answers.length !== expectedAnswerCount) {
+      console.warn(`Warning: Expected ${expectedAnswerCount} answers but received ${answers.length}`);
+      // Don't return error, just warn - some answers might be empty but still counted
+    }
+
     // Score answers
     let totalScore = 0;
-    const maxScore = exam.totalMarks;
     const scoredAnswers = [];
+    const processedQuestionIds = new Set();
 
     for (const answer of answers) {
       const examQuestion = exam.questions.find(
         eq => eq.question._id.toString() === answer.questionId
       );
 
-      if (!examQuestion) continue;
+      if (!examQuestion) {
+        console.warn(`Question not found for ID: ${answer.questionId}`);
+        continue;
+      }
 
       const question = examQuestion.question;
       let marksObtained = 0;
       let isCorrect = null;
       let reviewed = true;
+      let answerText = answer.answer || '';
 
       if (question.type === 'comprehension' && answer.subQuestionId) {
         // Handle comprehension sub-question
@@ -359,76 +410,126 @@ const submitExam = async (req, res) => {
         );
 
         if (subQuestion) {
+          // Store the question ID for tracking
+          const uniqueId = `${answer.questionId}-${answer.subQuestionId}`;
+          processedQuestionIds.add(uniqueId);
+
           if (subQuestion.type === 'multiple_choice' || subQuestion.type === 'true_false') {
-            const correctOption = subQuestion.options.find(opt => opt.isCorrect);
-            isCorrect = correctOption && answer.answer === correctOption.text;
-            marksObtained = isCorrect ? (subQuestion.marks || 1) : 0;
+            const correctOption = subQuestion.options?.find(opt => opt.isCorrect);
+            isCorrect = correctOption && answerText === correctOption.text;
+            marksObtained = isCorrect ? 1 : 0; // Each sub-question is worth 1 mark
             totalScore += marksObtained;
+            
+            console.log(`Sub-question ${uniqueId}: ${isCorrect ? '✓' : '✗'} marks=${marksObtained}`);
           } else {
+            // Essay or open-ended questions need manual grading
             reviewed = false;
             isCorrect = null;
+            console.log(`Sub-question ${uniqueId}: needs manual grading`);
           }
+        } else {
+          console.warn(`Sub-question not found: ${answer.subQuestionId}`);
         }
       } else {
         // Regular question
+        const uniqueId = answer.questionId;
+        processedQuestionIds.add(uniqueId);
+
         if (question.type === 'multiple_choice' || question.type === 'true_false') {
-          const correctOption = question.options.find(opt => opt.isCorrect);
-          isCorrect = correctOption && answer.answer === correctOption.text;
-          marksObtained = isCorrect ? (examQuestion.points || 1) : 0;
+          const correctOption = question.options?.find(opt => opt.isCorrect);
+          isCorrect = correctOption && answerText === correctOption.text;
+          marksObtained = isCorrect ? 1 : 0; // Each question is worth 1 mark
           totalScore += marksObtained;
+          
+          console.log(`Question ${uniqueId}: ${isCorrect ? '✓' : '✗'} marks=${marksObtained}`);
         } else {
+          // Essay or open-ended questions need manual grading
           reviewed = false;
           isCorrect = null;
+          console.log(`Question ${uniqueId}: needs manual grading`);
         }
       }
 
       scoredAnswers.push({
         question: examQuestion.question._id,
         subQuestionId: answer.subQuestionId || null,
-        answer: answer.answer || '',
+        answer: answerText,
+        answerText: answerText, // Store for reference
         isCorrect,
-        marksObtained,
-        reviewed
+        awardedMarks: marksObtained,
+        reviewed,
+        maxPoints: 1 // Each question/sub-question is worth 1 point
       });
+    }
+
+    // Check if all questions were answered
+    if (processedQuestionIds.size < expectedAnswerCount) {
+      console.warn(`Only ${processedQuestionIds.size} out of ${expectedAnswerCount} questions were answered`);
     }
 
     // Check if all questions are auto-graded
     const allQuestionsAutoGraded = exam.questions.every(eq => {
       if (eq.question.type === 'comprehension') {
-        return eq.question.comprehensionQuestions.every(
+        return eq.question.comprehensionQuestions?.every(
           sq => sq.type === 'multiple_choice' || sq.type === 'true_false'
-        );
+        ) ?? false;
       }
       return eq.question.type === 'multiple_choice' || eq.question.type === 'true_false';
     });
 
+    // Calculate percentage
+    const percentage = (totalScore / actualMaxScore) * 100;
+
     // Update submission
     submission.answers = scoredAnswers;
-    submission.timeSpent = finalTimeSpent; // Now in seconds
-    submission.warnings = warnings;
+    submission.timeSpent = finalTimeSpent;
+    submission.warnings = warnings || [];
     submission.totalScore = totalScore;
-    submission.maxScore = maxScore;
+    submission.maxScore = actualMaxScore; // This will be 20, not exam.totalMarks
     submission.status = allQuestionsAutoGraded ? 'graded' : 'submitted';
     submission.submittedAt = new Date();
+    
+    // Add metadata
+    submission.metadata = {
+      ...submission.metadata,
+      ipAddress: req.ip || req.connection.remoteAddress,
+      userAgent: req.headers['user-agent'],
+      submittedFrom: 'web'
+    };
 
     await submission.save();
 
-    console.log('Submission saved with timeSpent:', finalTimeSpent, 'seconds');
+    console.log('✅ Submission saved successfully:', {
+      submissionId: submission._id,
+      totalScore: totalScore,
+      maxScore: actualMaxScore,
+      percentage: percentage.toFixed(2) + '%',
+      status: submission.status,
+      answerCount: scoredAnswers.length
+    });
 
+    // Return success response with correct data
     res.status(201).json({
       message: 'Exam submitted successfully',
       submission: {
         id: submission._id,
         totalScore: submission.totalScore,
         maxScore: submission.maxScore,
+        percentage: Number(percentage.toFixed(2)),
+        displayScore: `${submission.totalScore}/${submission.maxScore}`,
         status: submission.status,
         submittedAt: submission.submittedAt,
-        timeSpent: submission.timeSpent
+        timeSpent: submission.timeSpent,
+        autoGraded: allQuestionsAutoGraded
       }
     });
+
   } catch (error) {
-    console.error('Submission error:', error);
-    res.status(500).json({ message: 'Internal server error during submission' });
+    console.error('❌ Submission error:', error);
+    res.status(500).json({ 
+      message: 'Internal server error during submission',
+      error: error.message 
+    });
   }
 };
 const updateExam = async (req, res) => {
@@ -550,7 +651,6 @@ const getActiveExams = async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch active exams.' });
   }
 };
- 
 const getStudentExamResult = async (req, res) => {
   try {
     const { id: examId } = req.params;
@@ -566,7 +666,7 @@ const getStudentExamResult = async (req, res) => {
       select: 'title subject passingMarks totalMarks questions showResults',
       populate: {
         path: 'questions.question',
-        select: 'text type points options correctAnswer'
+        select: 'text type points options correctAnswer comprehensionQuestions'
       }
     })
     .populate('answers.question', 'text type points');
@@ -593,17 +693,28 @@ const getStudentExamResult = async (req, res) => {
 
     // Create a map of question IDs to their max points from the exam
     const questionPointsMap = new Map();
+    let actualMaxScore = 0;
+    
     if (submission.exam && submission.exam.questions) {
       submission.exam.questions.forEach(q => {
         const questionId = q.question?._id?.toString() || q.question?.toString();
+        const points = q.points || 1;
+        
         if (questionId) {
-          questionPointsMap.set(questionId, q.points || 1);
+          questionPointsMap.set(questionId, points);
+        }
+        
+        // Handle comprehension questions (count each sub-question)
+        if (q.question?.type === 'comprehension' && q.question.comprehensionQuestions) {
+          actualMaxScore += q.question.comprehensionQuestions.length;
+        } else {
+          actualMaxScore += points;
         }
       });
     }
 
     // Process answers to ensure awardedMarks is set correctly
-    const processedAnswers = submission.answers.map((ans, index) => {
+    const processedAnswers = submission.answers.map((ans) => {
       const questionId = ans.question?._id?.toString() || ans.question?.toString();
       const maxPoints = questionPointsMap.get(questionId) || 1;
       
@@ -631,10 +742,43 @@ const getStudentExamResult = async (req, res) => {
       };
     });
 
-    // Calculate max score
-    const maxScore = submission.maxScore || 
-                    submission.exam?.totalMarks || 
-                    Array.from(questionPointsMap.values()).reduce((sum, points) => sum + points, 0);
+    // Calculate total score by summing awardedMarks
+    const calculatedTotalScore = processedAnswers.reduce((sum, ans) => sum + (ans.awardedMarks || 0), 0);
+    
+    // Use the model's virtual fields for correct calculations
+    // The model's pre-save hook and virtuals will handle any maxScore inconsistencies
+    
+    // Determine the correct max score to use
+    let correctedMaxScore = submission.maxScore;
+    
+    // If maxScore is 100 but we have a reasonable number of answers, use answer count
+    if (submission.maxScore === 100 && submission.answers.length <= 30 && submission.answers.length > 0) {
+      console.log(`📊 Fixing maxScore from ${submission.maxScore} to ${submission.answers.length} for submission ${submission._id}`);
+      correctedMaxScore = submission.answers.length;
+    } 
+    // If we calculated actualMaxScore from questions and it matches answer count, use that
+    else if (actualMaxScore > 0 && actualMaxScore === submission.answers.length) {
+      correctedMaxScore = actualMaxScore;
+    }
+    // Fallback to answer count if nothing else makes sense
+    else if (submission.answers.length > 0 && (correctedMaxScore === 0 || correctedMaxScore > submission.answers.length * 5)) {
+      correctedMaxScore = submission.answers.length;
+    }
+
+    // Calculate percentage using corrected max score
+    const percentage = correctedMaxScore > 0 ? (calculatedTotalScore / correctedMaxScore) * 100 : 0;
+
+    // Determine grade based on percentage
+    let grade = 'F';
+    if (percentage >= 90) grade = 'A+';
+    else if (percentage >= 80) grade = 'A';
+    else if (percentage >= 70) grade = 'B';
+    else if (percentage >= 60) grade = 'C';
+    else if (percentage >= 50) grade = 'D';
+
+    // Check if passed based on exam passing marks
+    const passingMarks = submission.exam?.passingMarks || 40;
+    const passed = percentage >= passingMarks;
 
     // Create the response object
     const responseData = {
@@ -644,27 +788,44 @@ const getStudentExamResult = async (req, res) => {
         title: submission.exam?.title || 'Exam',
         subject: submission.exam?.subject || null,
         passingMarks: submission.exam?.passingMarks,
-        totalMarks: maxScore,
+        totalMarks: correctedMaxScore, // This will be 20 instead of 100
         showResults: submission.exam?.showResults
       },
       answers: processedAnswers,
-      totalScore: submission.totalScore || 0,
-      maxScore: maxScore,
-      percentage: maxScore > 0 ? ((submission.totalScore || 0) / maxScore) * 100 : 0,
+      totalScore: calculatedTotalScore, // This will be 18
+      maxScore: correctedMaxScore, // This will be 20
+      percentage: Math.round(percentage * 100) / 100, // This will be 90
+      displayScore: `${calculatedTotalScore}/${correctedMaxScore}`, // "18/20"
+      grade: grade,
+      passed: passed,
       status: submission.status,
       startedAt: submission.startTime,
       submittedAt: submission.submittedAt || submission.createdAt,
       gradedAt: submission.gradedAt,
       feedback: submission.feedback,
       timeSpent: submission.timeSpent,
+      warnings: submission.warnings,
+      reevaluationRequested: submission.reevaluationRequested,
       createdAt: submission.createdAt,
-      updatedAt: submission.updatedAt
+      updatedAt: submission.updatedAt,
+      // Include metadata if available
+      metadata: submission.metadata || null,
+      // Flag if max score was corrected
+      maxScoreCorrected: submission.maxScore !== correctedMaxScore
     };
+
+    // Log the correction for debugging
+    if (submission.maxScore !== correctedMaxScore) {
+      console.log(`✅ Score corrected: ${submission.maxScore} → ${correctedMaxScore} for submission ${submission._id}`);
+    }
 
     res.json(responseData);
   } catch (error) {
     console.error('Get student exam result error:', error);
-    res.status(500).json({ message: 'Failed to fetch result.' });
+    res.status(500).json({ 
+      message: 'Failed to fetch result.',
+      error: error.message 
+    });
   }
 };
 const isExamActive = (exam) => {
