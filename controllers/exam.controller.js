@@ -855,10 +855,6 @@ const getExamSubmissions = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
-// In controllers/exam.controller.js
-// controllers/exam.controller.js - Update startExam function
-
-// controllers/exam.controller.js - Fixed startExam function
 const startExam = async (req, res) => {
   try {
     const { id: examId } = req.params;
@@ -869,7 +865,12 @@ const startExam = async (req, res) => {
     console.log('Student ID:', studentId);
 
     // 1. Validate exam exists and is published
-    const exam = await Exam.findById(examId);
+    const exam = await Exam.findById(examId)
+      .populate({
+        path: 'questions.question',
+        select: 'type comprehensionQuestions points'
+      });
+
     if (!exam) {
       return res.status(404).json({ message: 'Exam not found.' });
     }
@@ -882,7 +883,8 @@ const startExam = async (req, res) => {
       title: exam.title,
       duration: exam.duration,
       scheduledAt: exam.scheduledAt,
-      endsAt: exam.endsAt
+      endsAt: exam.endsAt,
+      totalQuestions: exam.totalQuestions
     });
 
     // 2. Validate timing - Check if within the exam window
@@ -903,14 +905,29 @@ const startExam = async (req, res) => {
       return res.status(400).json({ message: 'Exam window has closed.' });
     }
 
-    // 3. Check if student already has a submission
+    // 3. Calculate actual max score by counting questions
+    let actualMaxScore = 0;
+    exam.questions.forEach(eq => {
+      if (eq.question && eq.question.type === 'comprehension' && eq.question.comprehensionQuestions) {
+        // Each comprehension sub-question is worth 1 mark
+        actualMaxScore += eq.question.comprehensionQuestions.length;
+      } else {
+        // Regular question is worth 1 mark
+        actualMaxScore += 1;
+      }
+    });
+
+    console.log('Calculated actual max score:', actualMaxScore);
+
+    // 4. Check if student already has a submission
     let submission = await Submission.findOne({ exam: examId, student: studentId });
 
     console.log('Submission check:', submission ? {
       id: submission._id,
       status: submission.status,
       startTime: submission.startTime,
-      timeSpent: submission.timeSpent
+      timeSpent: submission.timeSpent,
+      maxScore: submission.maxScore
     } : 'No existing submission');
 
     // Calculate exam duration in milliseconds
@@ -918,6 +935,7 @@ const startExam = async (req, res) => {
     console.log('Duration in ms:', examDurationMs);
 
     if (submission) {
+      // Existing submission found
       if (submission.status !== 'draft') {
         return res.status(400).json({ message: 'Exam already submitted.' });
       }
@@ -938,6 +956,13 @@ const startExam = async (req, res) => {
         timeLeftMinutes: Math.floor(timeLeftMs / 60000)
       });
       
+      // Check if we need to update the maxScore in the submission
+      if (submission.maxScore === 100 && actualMaxScore > 0 && actualMaxScore !== 100) {
+        console.log(`📊 Updating submission maxScore from ${submission.maxScore} to ${actualMaxScore}`);
+        submission.maxScore = actualMaxScore;
+        await submission.save();
+      }
+      
       // Get questions
       const fullQuestions = await getExamQuestions(exam);
       
@@ -949,7 +974,7 @@ const startExam = async (req, res) => {
           title: exam.title,
           subject: exam.subject,
           duration: exam.duration,
-          totalMarks: exam.totalMarks,
+          totalMarks: actualMaxScore || exam.totalMarks, // Use actual max score
           shuffleQuestions: exam.shuffleQuestions,
           instructions: exam.instructions,
           scheduledAt: exam.scheduledAt,
@@ -958,16 +983,26 @@ const startExam = async (req, res) => {
         }
       });
     } else {
-      // Create new draft submission
+      // Create new draft submission with correct maxScore
+      const maxScoreToUse = actualMaxScore > 0 ? actualMaxScore : (exam.totalMarks || 100);
+      
+      console.log('Creating new submission with maxScore:', maxScoreToUse);
+      
       submission = new Submission({
         exam: examId,
         student: studentId,
         startTime: now,
-        maxScore: exam.totalMarks || 100,
+        maxScore: maxScoreToUse, // Use calculated actual max score (20) instead of exam.totalMarks (100)
         status: 'draft',
         answers: [],
-        timeSpent: 0
+        timeSpent: 0,
+        metadata: {
+          ipAddress: req.ip || req.connection.remoteAddress,
+          userAgent: req.headers['user-agent'],
+          deviceInfo: 'web'
+        }
       });
+      
       await submission.save();
 
       // For new exam, time left is the full duration
@@ -977,7 +1012,8 @@ const startExam = async (req, res) => {
         startTime: now.toISOString(),
         duration: exam.duration,
         timeLeftMs,
-        timeLeftMinutes: exam.duration
+        timeLeftMinutes: exam.duration,
+        maxScore: maxScoreToUse
       });
 
       const fullQuestions = await getExamQuestions(exam);
@@ -990,7 +1026,7 @@ const startExam = async (req, res) => {
           title: exam.title,
           subject: exam.subject,
           duration: exam.duration,
-          totalMarks: exam.totalMarks,
+          totalMarks: maxScoreToUse, // Use actual max score
           shuffleQuestions: exam.shuffleQuestions,
           instructions: exam.instructions,
           scheduledAt: exam.scheduledAt,
@@ -1007,8 +1043,6 @@ const startExam = async (req, res) => {
     });
   }
 };
-
-// Helper function to get exam questions (make sure this is defined)
 async function getExamQuestions(exam) {
   try {
     const questionIds = exam.questions.map(q => q.question);
