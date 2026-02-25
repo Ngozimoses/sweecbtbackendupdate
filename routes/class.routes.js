@@ -5,11 +5,8 @@ const { validate } = require('../middleware/validation');
 const classValidator = require('../validators/class.validator');
 const classCtrl = require('../controllers/class.controller');
 
-// All routes are protected
-router.use(protect);
-
-// Public routes (still need protection but accessible by all authenticated users)
-router.get('/public', requireRole('admin', 'teacher', 'student'), classCtrl.getPublicClasses);
+router.get('/public', classCtrl.getPublicClasses);
+router.use(protect); 
 
 // Admin/Teacher routes
 router.route('/')
