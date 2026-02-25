@@ -87,84 +87,34 @@ const SubmissionSchema = new mongoose.Schema({
     deviceInfo: String
   }
 }, {
-  timestamps: true
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
 });
 
- // Pre-save hook to validate and correct maxScore
-SubmissionSchema.pre('save', async function(next) {
-  try {
-    // Only run this check if we have answers and we're not in the middle of grading
-    if (this.answers && this.answers.length > 0) {
-      
-      // If maxScore is suspiciously high (like 100) but we have a reasonable number of answers
-      if (this.maxScore === 100 && this.answers.length <= 30) {
-        console.log(`⚠️ Fixing maxScore from ${this.maxScore} to ${this.answers.length} based on answer count`);
-        this.maxScore = this.answers.length;
-      }
-      
-      // More accurate: Try to get the exam and calculate real max score
-      if (!this.populated('exam')) {
-        const Exam = mongoose.model('Exam');
-        const exam = await Exam.findById(this.exam).populate('questions.question');
-        
-        if (exam) {
-          let calculatedMaxScore = 0;
-          
-          // Calculate based on exam structure
-          exam.questions.forEach(eq => {
-            if (eq.question && eq.question.type === 'comprehension' && eq.question.comprehensionQuestions) {
-              // Each comprehension sub-question is worth 1 mark
-              calculatedMaxScore += eq.question.comprehensionQuestions.length;
-            } else {
-              // Regular question is worth 1 mark
-              calculatedMaxScore += 1;
-            }
-          });
-          
-          // If calculated max score matches answer count, use it
-          if (calculatedMaxScore === this.answers.length && this.maxScore !== calculatedMaxScore) {
-            console.log(`✅ Correcting maxScore from ${this.maxScore} to ${calculatedMaxScore}`);
-            this.maxScore = calculatedMaxScore;
-          }
-        }
-      }
-    }
-    next(); // Call next() at the end
-  } catch (error) {
-    console.error('Error in Submission pre-save hook:', error);
-    next(error); // Pass error to next()
+// Virtual for corrected max score (handles the 100 vs 20 issue)
+SubmissionSchema.virtual('correctedMaxScore').get(function() {
+  // If maxScore is 100 but we have a reasonable number of answers (like 20)
+  if (this.maxScore === 100 && this.answers && this.answers.length > 0 && this.answers.length <= 30) {
+    return this.answers.length;
   }
+  return this.maxScore;
 });
 
-// Post-init hook (this one doesn't need next)
-SubmissionSchema.post('init', function(doc) {
-  // If this is a new document or being fetched
-  if (doc.answers && doc.answers.length > 0) {
-    // If maxScore is 100 but we have a reasonable number of answers, flag for frontend
-    if (doc.maxScore === 100 && doc.answers.length <= 30) {
-      doc._maxScoreNeedsFixing = true;
-      doc._correctMaxScore = doc.answers.length;
-    }
-  }
-});
-// Post-find middleware to ensure correct maxScore when retrieving
- 
-// Virtual for percentage that uses correct calculation
+// Virtual for correct percentage calculation
 SubmissionSchema.virtual('correctPercentage').get(function() {
-  const maxScoreToUse = (this.maxScore === 100 && this.answers?.length <= 30) 
-    ? this.answers.length 
-    : this.maxScore;
-  
+  const maxScoreToUse = this.correctedMaxScore;
   return maxScoreToUse > 0 ? (this.totalScore / maxScoreToUse) * 100 : 0;
 });
 
 // Virtual for display score (e.g., "18/20")
 SubmissionSchema.virtual('displayScore').get(function() {
-  const maxScoreToUse = (this.maxScore === 100 && this.answers?.length <= 30) 
-    ? this.answers.length 
-    : this.maxScore;
-  
-  return `${this.totalScore}/${maxScoreToUse}`;
+  return `${this.totalScore}/${this.correctedMaxScore}`;
+});
+
+// Virtual to check if maxScore needs correction
+SubmissionSchema.virtual('maxScoreNeedsCorrection').get(function() {
+  return this.maxScore === 100 && this.answers && this.answers.length > 0 && this.answers.length <= 30;
 });
 
 // Indexes
@@ -173,9 +123,5 @@ SubmissionSchema.index({ student: 1 });
 SubmissionSchema.index({ status: 1 });
 SubmissionSchema.index({ createdAt: 1 });
 SubmissionSchema.index({ 'exam': 1, 'student': 1 }, { unique: true });
-
-// Ensure virtuals are included in JSON responses
-SubmissionSchema.set('toJSON', { virtuals: true });
-SubmissionSchema.set('toObject', { virtuals: true });
 
 module.exports = mongoose.model('Submission', SubmissionSchema);
